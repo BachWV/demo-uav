@@ -1,0 +1,19 @@
+{
+    "rapo_rwd": 0.0,
+    "space_limit_punishment_x": 0.0,
+    "space_limit_punishment_y": 0.0,
+    "reto_motion_1": 0.4,
+    "reto_motion_2": 0.3,
+    "reto_motion_3": 0.6,
+    "reto_ew_j_1": 0.2,
+    "reto_ew_j_2": 0.0,
+    "reto_ew_j_3": 1.5,
+    "remso_in": 0.0,
+    "remso_out": 0.0,
+    "communicate_max_range_rwd": 0.0,
+    "communicate_connectivity": 0.0,
+    "energy_consumption": 0.0,
+    "endurance_rwd": 0.0,
+    "alive_rwd": 0.0,
+    "collision_punish": 0.5
+}
