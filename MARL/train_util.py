@@ -15,16 +15,16 @@ def get_eval_actor(env_agent, arglist):
     actors_cur = [None for _ in range(env_agent)]
 
     for idx in range(env_agent):
-        actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx % 4))
+        actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx))
+    return actors_cur
 
-    # for idx in range(env_agent):
-    #     actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(2*idx+1))
 
-    # for idx in range(env_agent):
-    #     if idx in range(8):
-    #         actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx % 4))
-    #     else:
-    #         actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx % 4 + 4))
+def get_plane_actor(env_agent, arglist):
+    """init the trainers or load the old model"""
+    actors_cur = [None for _ in range(env_agent)]
+
+    for idx in range(env_agent):
+        actors_cur[idx] = torch.load(arglist.plane_model_name + 'a_c_{}.pt'.format(idx % 4))
     return actors_cur
 
 

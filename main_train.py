@@ -34,6 +34,9 @@ def train(arglist):
     env_agent = arglist.num_agents
     obs_shape_n = [state_dim for _ in range(env_agent)]  # 观测空间
     action_shape_n = [action_dim for _ in range(env_agent)]  # 动作空间
+
+    actors_plane_cur = get_plane_actor(env_agent, arglist)
+
     actors_cur, critics_cur, actors_tar, critics_tar, optimizers_a, optimizers_c = get_trainers(
         env_agent, obs_shape_n, action_shape_n, arglist)
 
@@ -59,7 +62,7 @@ def train(arglist):
     start_time = time.time()
     try:
         for episode_gone in range(arglist.max_episode):
-            obs_n = env.reset()
+            defence_obs_n,obs_n = env.reset()
             sum_episode_reward = 0
             agent_episode_reward = [0.0] * env_agent
             for episode_step in range(arglist.max_step):
@@ -68,13 +71,21 @@ def train(arglist):
                 obs_n_tensor = torch.from_numpy(np.array(obs_n)).to(arglist.device, torch.float)
 
                 action_n = [agent(obs) for
-                            agent, obs in zip(actors_cur, obs_n_tensor)]
+                            agent, obs in zip(actors_plane_cur, obs_n_tensor)]
 
                 action_n_2d = torch.stack(action_n)
-
                 action_n = action_n_2d.detach().cpu().numpy()
 
-                new_obs_n, rew_n, done_n, info = env.step(action_n)
+
+                defence_obs_n_tensor = torch.from_numpy(np.array(defence_obs_n)).to(arglist.device, torch.float)
+
+                defence_action_n = [agent(obs) for
+                            agent, obs in zip(actors_cur, defence_obs_n_tensor)]
+
+                defence_action_n_2d = torch.stack(defence_action_n)
+                defence_action_n = defence_action_n_2d.detach().cpu().numpy()
+
+                new_plane_obs_n, new_obs_n, rew_n, done_n, info = env.step(action_n, defence_action_n)
 
                 # save the experience
                 memory.add(obs_n, np.concatenate(action_n), rew_n, new_obs_n, done_n)

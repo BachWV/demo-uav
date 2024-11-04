@@ -6,8 +6,9 @@ import random
 
 import numpy as np
 
-from utils.util import merge_intervals
 from gym.envs.classic_control import rendering
+
+from envs.DefenceAgent import DefenceAgent
 from envs.J20 import J20
 from envs.Radar import Radar
 from envs.Agent import Agent
@@ -29,7 +30,6 @@ class Swarm(object):
         j20_3 = J20(j20_id=2, x=-300e3, y=-10e3, target=[0, -10e3])
         # self.J20 = J20(x=0, y=0, target=[150e3, 0]
 
-        # self.J20s = [j20_1,j20_2]
         self.J20s = [j20_1, j20_2, j20_3]
         pos = [
             [-60e3, 2e3],
@@ -47,6 +47,13 @@ class Swarm(object):
             [-100e3, -10e3],
             [-100e3, -9e3],
         ]  # agent的初始化位置
+        plane_num = len(pos)
+
+        pos_defence = [
+            [-40e3, 0],
+            [-50e3, 10e3],
+            [-60e3, -10e3],
+        ]
 
 
         self.agents = [Agent(
@@ -55,6 +62,13 @@ class Swarm(object):
             env=self,
             reward_weight=self.args_all.reward_weight,
             J_20=self.J20s[agent_id//4],
+        ) for agent_id in range(plane_num)]
+        self.defence_agents = [DefenceAgent(
+            agent_id=agent_id,
+            init_pos=pos_defence[agent_id],
+            env=self,
+            reward_weight=self.args_all.reward_weight,
+
         ) for agent_id in range(agent_num)]
         self.agent_num = agent_num
 
@@ -79,7 +93,8 @@ class Swarm(object):
                 'x': [],
                 'y': [],
                 'heading': [],
-                'reward': []
+                'reward': [],
+                'hp': [],
             }
             self.dic['agents'][agent.agent_id] = temp
         for j20 in self.J20s:
@@ -103,7 +118,7 @@ class Swarm(object):
         for agent in self.agents:
             agent.J20 = self.J20s[0]
 
-    def update(self, actions):
+    def update(self, actions, defence_actions):
         """
         actions: n个agent的动作的集合，actions[i]为第i+1个agent的动作向量，
         actions的形状为agent_num行，action_dim列
@@ -116,14 +131,9 @@ class Swarm(object):
             radar.update()
 
         for i, agent in enumerate(self.agents):
-            # if actions is None:
-            #     # action = [0 for j in range(self.agent_num)]
-            #     action = [0 for j in range(agent.action_dim)]
-            #     t = np.random.randint(0, self.agent_num)
-            #     action[t] = 1
-            # else:
-            #     action = actions[i]
             agent.update(actions[i])
+        for i, agent in enumerate(self.defence_agents):
+            agent.update(defence_actions[i])
         if self.args_all.use_render:
             self.log_update()
 
@@ -194,22 +204,30 @@ class MyEnv(object):
         sub_agent_obs = []
         for ag in self.swarm.agents:
             sub_agent_obs.append(np.array(ag.obs))
-        return sub_agent_obs
 
-    def step(self, actions):
+        sub_defence_agent_obs = []
+        for ag in self.swarm.defence_agents:
+            sub_defence_agent_obs.append(np.array(ag.obs))
+        return sub_agent_obs, sub_defence_agent_obs
+
+    def step(self, actions, defence_actions):
         sub_agent_obs = []
+        sub_plane_obs = []
         sub_agent_reward = []
         sub_agent_done = []
         sub_agent_info = []
 
-        self.swarm.update(actions=actions)
+        self.swarm.update(actions=actions, defence_actions=defence_actions)
         for agent in self.swarm.agents:
+            sub_plane_obs.append(np.array(agent.obs))
+
+        for agent in self.swarm.defence_agents:
             sub_agent_obs.append(np.array(agent.obs))
             sub_agent_reward.append(agent.get_reward())
             sub_agent_done.append(agent.is_done())
             sub_agent_info.append({})
 
-        return [sub_agent_obs, sub_agent_reward, sub_agent_done, sub_agent_info]
+        return [sub_plane_obs,sub_agent_obs, sub_agent_reward, sub_agent_done, sub_agent_info]
 
     def render(self, mode='human'):
         screen_width = 1000

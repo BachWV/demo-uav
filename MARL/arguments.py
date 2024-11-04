@@ -28,6 +28,8 @@ def parse_args():
     parser.add_argument("--restore", action="store_true", default=True)
     parser.add_argument("--save_dir", type=str, default="models/",
                         help="directory in which training state and model are loaded")
+    parser.add_argument("--plane_model_name", type=str, default="models/2024-06-20-11-53-25/",
+                        help="无人机集群模型的路径")
     parser.add_argument("--old_model_name", type=str, default="models/2024-06-20-11-53-25/",
                         help="the number of the episode for saving the model")
     parser.add_argument("--log_interval", type=int, default=50,
