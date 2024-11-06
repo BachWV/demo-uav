@@ -22,6 +22,7 @@ class Agent(object):
         # 决策空间维度，即actor网络输出的动作是一个拟定让UAV飞向的角度，但是实际，UAV无法瞬时转向，
         # 因此agent更新是向action_heading方向进行一step的转向
         self.action_dim = 3
+        self.hp = 100
 
         self.radar = Radar(radar_id=0, x=0, y=0)  # ganrao目标，当前为随意初始化的一个实例， 后续会进行分配
         self.J20 = J_20
@@ -67,7 +68,8 @@ class Agent(object):
 
 
     def update(self, action):
-        self.move(acc=0, action=action)
+        if self.hp > 0:
+            self.move(acc=0, action=action)
         self.get_obs()
 
     def move(self, acc, action):

@@ -16,7 +16,6 @@ class J20(object):
         self.heading = np.arctan2((target[1] - self.y), (target[0] - self.x))  # 与x轴正方向的夹角的弧度[-pi, +pi]
         self.cover_rate = 0
         self.total_cover_range = 0
-        self.hp = 100  # 生命值
         self.itr = 0
 
 

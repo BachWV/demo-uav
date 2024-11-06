@@ -35,7 +35,7 @@ def train(arglist):
     obs_shape_n = [state_dim for _ in range(env_agent)]  # 观测空间
     action_shape_n = [action_dim for _ in range(env_agent)]  # 动作空间
 
-    actors_plane_cur = get_plane_actor(env_agent, arglist)
+    actors_plane_cur = get_plane_actor(12, arglist)
 
     actors_cur, critics_cur, actors_tar, critics_tar, optimizers_a, optimizers_c = get_trainers(
         env_agent, obs_shape_n, action_shape_n, arglist)
@@ -62,7 +62,7 @@ def train(arglist):
     start_time = time.time()
     try:
         for episode_gone in range(arglist.max_episode):
-            defence_obs_n,obs_n = env.reset()
+            obs_n, defence_obs_n = env.reset()
             sum_episode_reward = 0
             agent_episode_reward = [0.0] * env_agent
             for episode_step in range(arglist.max_step):
@@ -95,16 +95,16 @@ def train(arglist):
                 sum_episode_reward += np.sum(rew_n)  # np.sum(rew_n)
 
                 # 基于新的观测做预测
-                obs_n = new_obs_n
+                obs_n = new_plane_obs_n
                 game_step += 1
 
             # train our agents
-            model_update_cnt, actors_cur, actors_tar, critics_cur, critics_tar = agents_train(
-                arglist, game_step, model_update_cnt,
-                memory, obs_size, action_size,
-                actors_cur, actors_tar,
-                critics_cur, critics_tar,
-                optimizers_a, optimizers_c)
+            # model_update_cnt, actors_cur, actors_tar, critics_cur, critics_tar = agents_train(
+            #     arglist, game_step, model_update_cnt,
+            #     memory, obs_size, action_size,
+            #     actors_cur, actors_tar,
+            #     critics_cur, critics_tar,
+            #     optimizers_a, optimizers_c)
             if episode_gone == arglist.max_episode - 1:
                 save_model_now(arglist, actors_cur, actors_tar, critics_cur, critics_tar)
             writer.add_scalar('train_episode_rewards', sum_episode_reward/env_agent, global_step=episode_gone)

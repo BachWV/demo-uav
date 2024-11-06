@@ -13,7 +13,7 @@ from matplotlib import animation as ani
 from matplotlib import patches
 from utils.util import check_suppress_plot
 
-trace_file = '../trace/weight01/render/run0.json'
+trace_file = '../trace/weight01/render/run4.json'
 
 
 class Agent(object):
@@ -24,6 +24,7 @@ class Agent(object):
         self.Y = dic['y']
         self.Heading = dic['heading']
         self.R = dic['reward']
+        self.hp = dic['hp']
         self.plt_sca = self.ax.scatter(0, 0)
         self.plt_trj, = self.ax.plot(0, 0)
         self.wedge = patches.Wedge(center=(-1e7, -1e7), r=5e3, theta1=0, theta2=0, ec='none', color='r', alpha=0.3)
@@ -31,18 +32,44 @@ class Agent(object):
         # self.plt_txt = self.ax.text(x,y,'%d'%(r),bbox=dict(boxstyle='round',fc='w'),fontsize=8)
 
     def update(self, itr):
-        self.plt_sca.set_offsets([self.X[itr], self.Y[itr]])
-        self.plt_trj.set_data([self.X[itr - 10:itr], self.Y[itr - 10:itr]])
-        # 更新扫描
-        self.wedge.set_center((self.X[itr], self.Y[itr]))
-        self.scan_center = self.Heading[itr]
-        self.wedge.set_theta1(self.scan_center - 45)
-        self.wedge.set_theta2(self.scan_center + 45)
+        hp = self.hp[itr] // 10
+        if hp > 0:
+            self.plt_sca.set_offsets([self.X[itr], self.Y[itr]])
+
+            self.plt_trj.set_data([self.X[itr - hp:itr], self.Y[itr - hp:itr]])
+            # 更新扫描
+            self.wedge.set_center((self.X[itr], self.Y[itr]))
+            self.scan_center = self.Heading[itr]
+            self.wedge.set_theta1(self.scan_center - 45)
+            self.wedge.set_theta2(self.scan_center + 45)
+        else:
+            self.plt_sca.set_offsets([0, 0])
+            self.plt_trj.set_data([0, 0])
+            self.wedge.set_center((-1e7, -1e7))
+
         '''
         self.plt_txt[idx].set_x(x)
         self.plt_txt[idx].set_y(y)
         self.plt_txt[idx].set_text('%d'%(r))
         '''
+class DefenceAgent(object):
+    """
+    我方激光
+    """
+
+    def __init__(self, axes, dic):
+        self.ax = axes
+        self.X = dic['x']
+        self.Y = dic['y']
+        self.attack_x = dic['attack_x']
+        self.attack_y = dic['attack_y']
+        self.plt_sca = self.ax.scatter(self.X[0], self.Y[0], color='r') # plt_scatter 是什么
+        self.plt_trj, = self.ax.plot(self.X[0], self.Y[0], color='r')
+
+
+
+    def update(self, itr):
+        pass
 
 
 class J20(object):
@@ -85,19 +112,24 @@ class Line(object):
     用来画两个Radar和J20之间的连线
     """
 
-    def __init__(self, axes, dic_plane, dic_radar_1):
+    def __init__(self, axes, dic_defence_agents):
         self.ax = axes
-        self.dic_plane = dic_plane
-        self.dic_radar_1 = dic_radar_1
+        self.dic_defence_agents = dic_defence_agents
+        self.lines = []
+        #遍历dic_defence_agents中的每一个defence_agent
 
-        self.line_plane2radar_1 = matplotlib.lines.Line2D(xdata=[self.dic_plane['x'][0], self.dic_radar_1['x'][0]],
-                                                          ydata=[self.dic_plane['y'][0], self.dic_radar_1['y'][0]])
 
-        self.ax.add_line(self.line_plane2radar_1)
+        for defence_agent in self.dic_defence_agents.values():
+            self.line_plane2radar_1 = matplotlib.lines.Line2D(xdata=[defence_agent['x'][0], defence_agent['attack_x'][0]],
+                                                                ydata=[defence_agent['y'][0], defence_agent['attack_y'][0]])
+            self.lines.append(self.line_plane2radar_1)
+            self.ax.add_line(self.line_plane2radar_1)
 
     def update(self, itr):
-        self.line_plane2radar_1.set(xdata=[self.dic_plane['x'][itr], self.dic_radar_1['x'][itr]],
-                                    ydata=[self.dic_plane['y'][itr], self.dic_radar_1['y'][itr]])
+        for line,defence_agent in zip(self.lines,self.dic_defence_agents.values()):
+            line.set(xdata=[defence_agent['x'][itr], defence_agent['attack_x'][itr]],
+                     ydata=[defence_agent['y'][itr], defence_agent['attack_y'][itr]])
+
 
 
 
@@ -169,8 +201,7 @@ class PlotOffLine(object):
         self.dic_radar_plane = {}
         self.line1 = Line(
             axes=self.ax,
-            dic_plane=self.dic['J20']['0'],
-            dic_radar_1=self.dic['radars']['radar1']
+            dic_defence_agents=self.dic['defence_agents']
         )
 
 
@@ -184,9 +215,9 @@ class PlotOffLine(object):
         self.entity = []
         with open(trace_file) as fo:
             self.dic = json.load(fo)
-            if 'J20' in self.dic:
-                plane0 = J20(ax=self.ax, dic=self.dic['J20']['0'])
-                self.entity.append(plane0)
+            # if 'J20' in self.dic:
+            #     plane0 = J20(ax=self.ax, dic=self.dic['J20']['0'])
+            #     self.entity.append(plane0)
 
 
             if 'radars' in self.dic:
@@ -196,6 +227,10 @@ class PlotOffLine(object):
             if 'agents' in self.dic:
                 for ag_id in self.dic['agents']:
                     ag = Agent(axes=self.ax, dic=self.dic['agents'][ag_id])
+                    self.entity.append(ag)
+            if 'defence_agents' in self.dic:
+                for ag_id in self.dic['defence_agents']:
+                    ag = DefenceAgent(axes=self.ax, dic=self.dic['defence_agents'][ag_id])
                     self.entity.append(ag)
 
     def update(self, itr):

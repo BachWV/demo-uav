@@ -17,15 +17,15 @@ def parse_args():
                         help="by default, make sure random seed effective. if set, bypass such function.")
     parser.add_argument("--n_training_threads", type=int,
                         default=20, help="Number of torch threads for training")
-    parser.add_argument('--num_agents', type=int, default=12, help="number of players")
+    parser.add_argument('--num_agents', type=int, default=3, help="number of players")
     parser.add_argument('--scenario_name', type=str, default="weight01", help="weight set")
     parser.add_argument("--note",type=str,default="双雷达还原奖励函数，增加对x轴倒飞的惩罚")
 
     parser.add_argument("--use_render", action='store_true', default=True,
                         help="by default, do not render-weight001-60% the env during training. If set, start render-weight001-60%. Note: something, the environment has internal render-weight001-60% process which is not controlled by this hyperparam.")
     parser.add_argument("--trace_dir", type=str, default="MADDPG3-1-radar")
-    parser.add_argument("--train", type=bool, default=False)  # True False
-    parser.add_argument("--restore", action="store_true", default=True)
+    parser.add_argument("--train", type=bool, default=True)  # True False
+    parser.add_argument("--restore", action="store_true", default=False)
     parser.add_argument("--save_dir", type=str, default="models/",
                         help="directory in which training state and model are loaded")
     parser.add_argument("--plane_model_name", type=str, default="models/2024-06-20-11-53-25/",

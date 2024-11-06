@@ -69,7 +69,7 @@ class Swarm(object):
             env=self,
             reward_weight=self.args_all.reward_weight,
 
-        ) for agent_id in range(agent_num)]
+        ) for agent_id in range(3)]
         self.agent_num = agent_num
 
         self.radar_allocate()  # 为无人机分配雷达目标
@@ -84,7 +84,8 @@ class Swarm(object):
         self.dic = {
             'J20': {},
             'agents': {},
-            'radars': {}
+            'radars': {},
+            'defence_agents': {},
         }  # 用于存储各个实体（雷达、无人机等）的轨迹，用于后续画图
 
         # 以下两个for循环用于完成对self.dic的agents和radars部分的初始化
@@ -108,6 +109,14 @@ class Swarm(object):
             self.dic['radars'][radar.radar_id] = {}
             self.dic['radars'][radar.radar_id]['x'] = []
             self.dic['radars'][radar.radar_id]['y'] = []
+        for defence_agent in self.defence_agents:
+            temp = {
+                'x': [],
+                'y': [],
+                'attack_x': [],
+                'attack_y': [],
+            }
+            self.dic['defence_agents'][defence_agent.agent_id] = temp
 
     def radar_allocate(self):
         for agent in self.agents:
@@ -147,6 +156,7 @@ class Swarm(object):
             self.dic['agents'][agent.agent_id]['y'].append(agent.y)
             self.dic['agents'][agent.agent_id]['heading'].append(agent.heading)
             self.dic['agents'][agent.agent_id]['reward'].append(agent.get_reward())
+            self.dic['agents'][agent.agent_id]['hp'].append(agent.hp)
         for itr, radar in enumerate(self.radars):
             self.dic['radars'][radar.radar_id]['x'].append(radar.x)
             self.dic['radars'][radar.radar_id]['y'].append(radar.y)
@@ -155,6 +165,11 @@ class Swarm(object):
             self.dic['J20'][itr]['x'].append(j20.x)
             self.dic['J20'][itr]['y'].append(j20.y)
 
+        for agent in self.defence_agents:
+            self.dic['defence_agents'][agent.agent_id]['x'].append(agent.x)
+            self.dic['defence_agents'][agent.agent_id]['y'].append(agent.y)
+            self.dic['defence_agents'][agent.agent_id]['attack_x'].append(agent.attack_position[0])
+            self.dic['defence_agents'][agent.agent_id]['attack_y'].append(agent.attack_position[1])
 
 
         if self.args_all.use_render:
@@ -223,7 +238,7 @@ class MyEnv(object):
 
         for agent in self.swarm.defence_agents:
             sub_agent_obs.append(np.array(agent.obs))
-            sub_agent_reward.append(agent.get_reward())
+            sub_agent_reward.append(0)
             sub_agent_done.append(agent.is_done())
             sub_agent_info.append({})
 

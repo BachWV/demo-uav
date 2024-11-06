@@ -32,7 +32,7 @@ class DefenceAgent(object):
         获得当前agent对环境的观测 10维
         """
         self.obs = [
-
+            1,1,1,1,1,1,1,1
         ]
 
 
@@ -47,11 +47,25 @@ class DefenceAgent(object):
                 映射关系为：[(元素1对应的index) + 1] * 2 = action_heading
         """
         # 攻击
-        distance = [np.linalg.norm([defence.x - self.x, defence.y - self.y]) for defence in self.env.agents]
+        distance = []
+        for defence in self.env.agents:
+            d = np.linalg.norm([defence.x - self.x, defence.y - self.y])
+            if d < self.Round:
+                distance.append(d)
+            else:
+                distance.append(100000)
         # 查找distance中最小值对应的索引
-        self.attack_index = distance.index(min(distance))
-        # 将对应的agent的hp减少10
-        self.env.agents[self.attack_index].hp -= 10
+
+
+        # index为排序后的从小到大的索引
+        index = np.argsort(distance)
+        self.attack_position = [self.x, self.y]
+        for ind in index:
+
+            if distance[ind] < self.Round and self.env.agents[ind].hp > 0:
+                self.env.agents[ind].hp -= 4 # 将对应的agent的hp减少10
+                self.attack_position = [self.env.agents[ind].x, self.env.agents[ind].y]
+                break
 
 
 
@@ -63,8 +77,8 @@ class DefenceAgent(object):
         """
         # if self.x > self.radar.x:
         #     return True
-        # return False
-        return self.check_cover(5)
+        return False
+
 
     def __rapo_rwd(self):
         """
@@ -111,50 +125,23 @@ class DefenceAgent(object):
         任务姿态对准奖励，Agent的heading对准目标，波束覆盖了目标，获得奖励
         Agent的波束覆盖角度预设为90度，heading两侧各45度
         """
-        angle = np.degrees(np.arctan2(self.radar.y - self.y, self.radar.x - self.x))
-        alpha = self.get_angle_diff(angle, self.heading)
-        reward = -10
-        if alpha < 20:
-            reward = 20
-        elif alpha < 45:
-            reward = 10
-        else:
-            reward = -5
-        if -100e3 < self.x < -50e3:
-            reward *= 2
-        return reward
+
+        return 0
     def __reto_motion_3(self):
         """
         agent距离J20和radar连线的距离 奖励
         """
-        lenth = self.lenth_agent_line
+
         reward = -5
-        if lenth < 1:
-            reward = 10
-        elif lenth < 2:
-            reward = 5
-        elif lenth < 6:
-            reward = 1
-        elif lenth < 8:
-            reward = 0
-        else:
-            reward = -5
-        if -100e3 < self.x < -50e3:
-            reward *= 2
+
         return reward
 
 
 
     def __reto_ew_j_1(self):
-        """
-        yazhi扇面奖励，连续拼接角度alpha越大，奖励越大
-        """
-        # 用于存储ganrao当前雷达的所有agent的yazhi扇面角度范围
-        all_pan_range = [agent.suppress_fan_range() for agent in self.radar.agents]
-        merged_pan_range = merge_intervals(all_pan_range)  # 用于存储合并后的yazhi扇面角度范围
-        merged_angle = max([np.abs(x[1] - x[0]) for x in merged_pan_range])  # 返回合并后的范围最大的角度范围
 
-        return merged_angle   # 1~4之间
+
+        return 0
 
 
     def __reto_ew_j_2(self):
