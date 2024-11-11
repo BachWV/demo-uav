@@ -1,4 +1,4 @@
-{
+weight01 = {
     "rapo_rwd": 0.0,
     "space_limit_punishment_x": 0.0,
     "space_limit_punishment_y": 0.0,

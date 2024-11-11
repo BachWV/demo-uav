@@ -13,6 +13,8 @@ from envs.J20 import J20
 from envs.Radar import Radar
 from envs.Agent import Agent
 
+import reward_weight.weight01
+
 
 class Swarm(object):
     """
@@ -113,6 +115,7 @@ class Swarm(object):
             temp = {
                 'x': [],
                 'y': [],
+                'reward': [],
                 'attack_x': [],
                 'attack_y': [],
             }
@@ -155,19 +158,19 @@ class Swarm(object):
             self.dic['agents'][agent.agent_id]['x'].append(agent.x)
             self.dic['agents'][agent.agent_id]['y'].append(agent.y)
             self.dic['agents'][agent.agent_id]['heading'].append(agent.heading)
-            self.dic['agents'][agent.agent_id]['reward'].append(agent.get_reward())
             self.dic['agents'][agent.agent_id]['hp'].append(agent.hp)
-        for itr, radar in enumerate(self.radars):
-            self.dic['radars'][radar.radar_id]['x'].append(radar.x)
-            self.dic['radars'][radar.radar_id]['y'].append(radar.y)
-
-        for itr, j20 in enumerate(self.J20s):
-            self.dic['J20'][itr]['x'].append(j20.x)
-            self.dic['J20'][itr]['y'].append(j20.y)
+        # for itr, radar in enumerate(self.radars):
+        #     self.dic['radars'][radar.radar_id]['x'].append(radar.x)
+        #     self.dic['radars'][radar.radar_id]['y'].append(radar.y)
+        #
+        # for itr, j20 in enumerate(self.J20s):
+        #     self.dic['J20'][itr]['x'].append(j20.x)
+        #     self.dic['J20'][itr]['y'].append(j20.y)
 
         for agent in self.defence_agents:
             self.dic['defence_agents'][agent.agent_id]['x'].append(agent.x)
             self.dic['defence_agents'][agent.agent_id]['y'].append(agent.y)
+            self.dic['defence_agents'][agent.agent_id]['reward'].append(agent.reward)
             self.dic['defence_agents'][agent.agent_id]['attack_x'].append(agent.attack_position[0])
             self.dic['defence_agents'][agent.agent_id]['attack_y'].append(agent.attack_position[1])
 
@@ -205,13 +208,13 @@ class MyEnv(object):
     """
 
     def __init__(self, args_all):
-        with open(os.path.abspath(f"./reward_weight/{args_all.scenario_name}.json"), 'r') as fo:
-            temp = json.load(fo)
-        args_all.reward_weight = list(temp.values())
+        # with open(os.path.abspath(f"./reward_weight/{args_all.scenario_name}.json"), 'r') as fo:
+        #     temp = json.load(fo)
+        args_all.reward_weight = reward_weight.weight01
         self.agent_num = args_all.num_agents  # 设置智能体(小飞机)的个数
         self.swarm = Swarm(agent_num=self.agent_num, args_all=args_all)
-        self.obs_dim = len(self.swarm.agents[0].obs)  # 设置智能体的观测维度
-        self.action_dim = self.swarm.agents[0].action_dim  # 设置智能体的动作维度
+        self.obs_dim = len(self.swarm.defence_agents[0].obs)  # 设置智能体的观测维度
+        self.action_dim = self.swarm.defence_agents[0].action_dim  # 设置智能体的动作维度
         self.viewer = None
 
     def reset(self):
@@ -238,7 +241,7 @@ class MyEnv(object):
 
         for agent in self.swarm.defence_agents:
             sub_agent_obs.append(np.array(agent.obs))
-            sub_agent_reward.append(0)
+            sub_agent_reward.append(agent.reward)
             sub_agent_done.append(agent.is_done())
             sub_agent_info.append({})
 

@@ -13,7 +13,7 @@ from matplotlib import animation as ani
 from matplotlib import patches
 from utils.util import check_suppress_plot
 
-trace_file = '../trace/weight01/render/run4.json'
+trace_file = '../trace/weight01/render/run18.json'
 
 
 class Agent(object):
@@ -32,7 +32,7 @@ class Agent(object):
         # self.plt_txt = self.ax.text(x,y,'%d'%(r),bbox=dict(boxstyle='round',fc='w'),fontsize=8)
 
     def update(self, itr):
-        hp = self.hp[itr] // 10
+        hp = int(self.hp[itr] // 10) #取整
         if hp > 0:
             self.plt_sca.set_offsets([self.X[itr], self.Y[itr]])
 
@@ -206,7 +206,7 @@ class PlotOffLine(object):
 
 
 
-        A = ani.FuncAnimation(fig=self.fig, func=self.update, frames=int(300))
+        A = ani.FuncAnimation(fig=self.fig, func=self.update, frames=int(400))
         # A.save("newmap35e3_18.gif",writer='pillow',dpi=100)
         plt.show()
 
@@ -220,10 +220,10 @@ class PlotOffLine(object):
             #     self.entity.append(plane0)
 
 
-            if 'radars' in self.dic:
-                for radar_id in self.dic['radars']:
-                    radar = Radar(ax=self.ax, dic=self.dic['radars'][radar_id])
-                    self.entity.append(radar)
+            # if 'radars' in self.dic:
+            #     for radar_id in self.dic['radars']:
+            #         radar = Radar(ax=self.ax, dic=self.dic['radars'][radar_id])
+            #         self.entity.append(radar)
             if 'agents' in self.dic:
                 for ag_id in self.dic['agents']:
                     ag = Agent(axes=self.ax, dic=self.dic['agents'][ag_id])

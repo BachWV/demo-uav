@@ -88,7 +88,7 @@ def train(arglist):
                 new_plane_obs_n, new_obs_n, rew_n, done_n, info = env.step(action_n, defence_action_n)
 
                 # save the experience
-                memory.add(obs_n, np.concatenate(action_n), rew_n, new_obs_n, done_n)
+                memory.add(defence_obs_n, np.concatenate(defence_action_n), rew_n, new_obs_n, done_n)
 
                 #episode_rewards.append(np.sum(rew_n))
                 agent_episode_reward = np.add(rew_n, agent_episode_reward)
@@ -99,12 +99,12 @@ def train(arglist):
                 game_step += 1
 
             # train our agents
-            # model_update_cnt, actors_cur, actors_tar, critics_cur, critics_tar = agents_train(
-            #     arglist, game_step, model_update_cnt,
-            #     memory, obs_size, action_size,
-            #     actors_cur, actors_tar,
-            #     critics_cur, critics_tar,
-            #     optimizers_a, optimizers_c)
+            model_update_cnt, actors_cur, actors_tar, critics_cur, critics_tar = agents_train(
+                arglist, game_step, model_update_cnt,
+                memory, obs_size, action_size,
+                actors_cur, actors_tar,
+                critics_cur, critics_tar,
+                optimizers_a, optimizers_c)
             if episode_gone == arglist.max_episode - 1:
                 save_model_now(arglist, actors_cur, actors_tar, critics_cur, critics_tar)
             writer.add_scalar('train_episode_rewards', sum_episode_reward/env_agent, global_step=episode_gone)
