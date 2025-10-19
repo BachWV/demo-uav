@@ -70,6 +70,7 @@ class Agent(object):
     def update(self, action):
         if self.hp > 0:
             self.move(acc=0, action=action)
+            self.attack()
         self.get_obs()
 
     def move(self, acc, action):
@@ -94,6 +95,14 @@ class Agent(object):
 
         self.x += self.vel * np.cos(np.radians(self.heading))
         self.y += self.vel * np.sin(np.radians(self.heading))
+
+    def attack(self):
+        for defenceagents in self.env.defence_agents:
+            if random.Random().random() < 0.1:
+                if np.linalg.norm([defenceagents.x - self.x, defenceagents.y - self.y]) < 1000:
+                    defenceagents.hp_decrease(5)
+    def hp_decrease(self, damage):
+        self.hp -= damage
 
     def get_vec_angle_cos(self, v1, v2):
         """

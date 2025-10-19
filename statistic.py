@@ -4,42 +4,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def total_cover_rate(cover_rate):
+def total_cover_rate(rate):
     # 创建数据
-    x = [i for i in range(1, 101)]
+    x = [i for i in range(len(rate))]
 
-    start_end = [
-        [0,250],
-        [0,150],
-        [150,250],
-        [143, 213]
-    ]
     ans = []
 
-    for tt in start_end:
-        start = tt[0]
-        end = tt[1]
-        avg_total_cover_rate_0_200 = []
-        for episode in cover_rate:
-            avg_total_cover_rate_0_200.append(np.mean(episode[start:end]))
+    for file in rate:
+        alive = 0
+        sum = 0
+        for agent in file.values():
+            hp = agent['hp'][-1]
+            if hp > 1:
+                alive += 1
+            sum += 1
+        a = 1 - alive / sum
+        print(a)
+        ans.append(a)
 
-        print(f'{start}-{end}step: ', np.mean(avg_total_cover_rate_0_200))
-        ans.append(avg_total_cover_rate_0_200)
 
-
-    is_cover = []
-    for episode in cover_rate:
-        if sum(episode[143:213]) == 70:
-            is_cover.append(1)
-        else:
-            is_cover.append(0)
-    print('143-213任务完成率', np.mean(is_cover))
+    print('击毁率', np.mean(ans))
 
     # 绘制曲线和拟合直线
-    plt.plot(x, ans[0], marker='v', markersize=8, label='0-250')
-    plt.plot(x, ans[1], marker='X', markersize=8, label='0-150')
-    plt.plot(x, ans[2], marker='P', markersize=8, label='150-250')
-    plt.plot(x, ans[3], marker='D', markersize=8, label='143-213')
+    plt.plot(x, ans, marker='v', markersize=8, label='0-250')
     # 添加图例和标签
     plt.legend()
     plt.xlabel('Experiment Round')
@@ -51,33 +38,20 @@ def total_cover_rate(cover_rate):
 
 
 
-data_path_root = r'trace/weight01/render'
+data_path_root = r'trace/weight01/render68300'
 
 datas_files = os.listdir(data_path_root)
 
-cover_rate = []
-
-radar_cover_range = []
-
+rate = []
 
 for filename in datas_files:
     trace_file = data_path_root + '/' + filename
     with open(trace_file) as fo:
         dic = json.load(fo)
-        # if dic['J20']['cover_rate'].__len__() != 200 or dic['J20']['total_cover_range'].__len__() != 200:
-        #     print(filename, 'length is not 200')
-        #     fo.close()
-        #    continue
-        cover_rate.append(dic['J20']['cover_rate'])
-        radar_cover_range.append(dic['J20']['total_cover_range'])
+        rate.append(dic['agents'])
 
 fo.close()
 
-print('掩护覆盖率')
-total_cover_rate(cover_rate)
 
-
-print('雷达掩护扇面角')
-total_cover_rate(radar_cover_range)
-
+total_cover_rate(rate)
 

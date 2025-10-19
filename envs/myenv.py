@@ -118,6 +118,7 @@ class Swarm(object):
                 'reward': [],
                 'attack_x': [],
                 'attack_y': [],
+                'hp': [],
             }
             self.dic['defence_agents'][defence_agent.agent_id] = temp
 
@@ -173,6 +174,7 @@ class Swarm(object):
             self.dic['defence_agents'][agent.agent_id]['reward'].append(agent.reward)
             self.dic['defence_agents'][agent.agent_id]['attack_x'].append(agent.attack_position[0])
             self.dic['defence_agents'][agent.agent_id]['attack_y'].append(agent.attack_position[1])
+            self.dic['defence_agents'][agent.agent_id]['hp'].append(agent.hp)
 
 
         if self.args_all.use_render:

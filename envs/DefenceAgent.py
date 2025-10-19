@@ -27,6 +27,7 @@ class DefenceAgent(object):
         self.obs = list()
         self.get_obs()
         self.reward = 0
+        self.hp = 100
 
     def get_obs(self):
         """
@@ -44,7 +45,8 @@ class DefenceAgent(object):
 
 
     def update(self, action):
-        self.attack(action=action)
+        if self.hp > 0:
+            self.attack(action=action)
         self.get_obs()
 
     def attack(self, action):
@@ -84,19 +86,28 @@ class DefenceAgent(object):
                         self.reward = 5
                     elif ai_idx[2] == ind:
                         self.reward = 3
-                    self.env.agents[ind].hp -= 8 * K # 将对应的agent的hp减少10
+                    else:
+                        self.reward = 0
+                    self.env.agents[ind].hp_decrease(8 * K) # 将对应的agent的hp减少10
                     self.attack_position = [self.env.agents[ind].x, self.env.agents[ind].y]
                     break
         else:
             for ind in ai_idx:
-
+                self.reward = 0
                 if distance[ind] < self.Round and self.env.agents[ind].hp > 0:
                     K = 1 - distance[ind] / self.Round
                     self.env.agents[ind].hp -= 8 * K  # 将对应的agent的hp减少10
+                    if self.env.agents[ind].hp < 0:
+                        self.reward = 10
+                    else:
+                        self.reward = 0
                     self.attack_position = [self.env.agents[ind].x, self.env.agents[ind].y]
                     break
 
+        assert self.reward <= 10, "奖励值超过上限"
 
+    def hp_decrease(self, damage):
+        self.hp -= damage
 
 
     def is_done(self) -> bool:
