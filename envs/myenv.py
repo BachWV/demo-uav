@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from envs.Agent import Agent
-from envs.DefenceAgent import DefenceAgent, MAX_ORDERS_PER_AGENT
+from envs.DefenceAgent import DefenceAgent
 from envs.Radar import Radar
 from envs.entities import (
     DRONE_TYPE_CONFIG,
@@ -57,12 +57,7 @@ class Swarm:
         }
         self.trace_dir = None
         self.trace_file = None
-        self.trace_buffer = {
-            "drones": {},
-            "orders": [],
-            "defence": {},
-            "metrics": [],
-        }
+        self.trace_frames: List[Dict] = []
         self.make_dir()
         self.reset_state()
 
@@ -95,22 +90,11 @@ class Swarm:
         self.order_pool.clear()
         self.order_map.clear()
         self.metrics = {k: 0 for k in self.metrics}
-        self.trace_buffer = {
-            "drones": {},
-            "orders": [],
-            "defence": {},
-            "metrics": [],
-        }
-        self._start_trace_file()
-        for defence_agent in self.defence_agents:
-            self.trace_buffer["defence"][defence_agent.agent_id] = {
-                "reward": [],
-                "attack_position": [],
-                "available_orders": [],
-            }
+        self.trace_frames = []
         self.agents = []
         self._spawn_wave()
-        self._flush_trace()
+        self._start_trace_file()
+        self._record_frame()
 
     def _spawn_wave(self):
         wave_size = 30
@@ -135,7 +119,6 @@ class Swarm:
                 )
                 agent.wave_id = 0
                 self.agents.append(agent)
-                self.trace_buffer["drones"][agent.agent_id] = {"x": [], "y": [], "hp": [], "status": []}
                 self.next_drone_id += 1
 
     def pick_secondary_target(self, drone_type: DroneType, direction_vector: np.ndarray) -> np.ndarray:
@@ -242,83 +225,65 @@ class Swarm:
             trace_path = self.trace_dir / f"{base_name}_{suffix}.json"
         self.trace_file = trace_path
 
-    def _update_traces(self):
-        for agent in self.agents:
-            buf = self.trace_buffer["drones"].setdefault(
-                agent.agent_id, {"x": [], "y": [], "hp": [], "status": []}
-            )
-            buf["x"].append(float(agent.position[0]))
-            buf["y"].append(float(agent.position[1]))
-            buf["hp"].append(float(agent.hp))
-            buf["status"].append(agent.status.name)
+    def _record_frame(self):
+        if self.trace_file is None:
+            return
 
-        orders_snapshot = []
-        for order in self.order_pool:
-            orders_snapshot.append(
-                {
-                    "order_id": int(order.order_id),
-                    "drone_id": int(order.drone_id),
-                    "threat": float(order.threat_level),
-                    "priority": float(order.priority),
-                    "time_to_target": float(order.estimated_time_to_target),
-                    "position": [float(order.position[0]), float(order.position[1])],
-                    "status": order.status.name,
-                    "weapon_assigned_to": order.assigned_to,
-                }
-            )
-        self.trace_buffer["orders"].append(
-            {
-                "step": int(self.step_count),
-                "time": float(self.current_time),
-                "orders": orders_snapshot,
-            }
-        )
-
-        for defence_agent in self.defence_agents:
-            defence_buf = self.trace_buffer["defence"].setdefault(
-                defence_agent.agent_id,
-                {
-                    "reward": [],
-                    "attack_position": [],
-                    "available_orders": [],
-                },
-            )
-            defence_buf["reward"].append(float(defence_agent.reward))
-            defence_buf["attack_position"].append(
-                [float(defence_agent.attack_position[0]), float(defence_agent.attack_position[1])]
-            )
-            defence_buf["available_orders"].append(
-                [order.order_id for order in getattr(defence_agent, "_available_orders", [])]
-            )
-
-        metric_entry = {
-            "time": float(self.current_time),
+        frame = {
             "step": int(self.step_count),
+            "time": float(self.current_time),
+            "drones": [
+                {
+                    "id": int(agent.agent_id),
+                    "type": agent.type.name,
+                    "x": float(agent.position[0]),
+                    "y": float(agent.position[1]),
+                    "hp": float(agent.hp),
+                    "status": agent.status.name,
+                }
+                for agent in self.agents
+            ],
+            "orders": [
+                {
+                    "id": int(order.order_id),
+                    "drone_id": int(order.drone_id),
+                    "priority": float(order.priority),
+                    "threat": float(order.threat_level),
+                    "x": float(order.position[0]),
+                    "y": float(order.position[1]),
+                    "status": order.status.name,
+                }
+                for order in self.order_pool
+            ],
+            "defenders": [
+                {
+                    "id": int(defence_agent.agent_id),
+                    "reward": float(defence_agent.reward),
+                    "orders": [order.order_id for order in getattr(defence_agent, "_available_orders", [])],
+                }
+                for defence_agent in self.defence_agents
+            ],
+            "metrics": {
+                key: float(val) if isinstance(val, (np.floating, float)) else int(val)
+                for key, val in self.metrics.items()
+            },
         }
-        for key, value in self.metrics.items():
-            if isinstance(value, (np.floating, float)):
-                metric_entry[key] = float(value)
-            else:
-                metric_entry[key] = int(value)
-        self.trace_buffer["metrics"].append(metric_entry)
+        self.trace_frames.append(frame)
         self._flush_trace()
 
     def _flush_trace(self):
         if self.trace_file is None:
             return
         payload = {
-            "scenario": self.args_all.scenario_name,
-            "seed": self.args_all.seed,
-            "current_time": float(self.current_time),
-            "step": int(self.step_count),
-            "metrics": {
-                key: float(val) if isinstance(val, (np.floating, float)) else int(val)
-                for key, val in self.metrics.items()
+            "meta": {
+                "scenario": self.args_all.scenario_name,
+                "seed": self.args_all.seed,
+                "time_step": TIME_STEP,
             },
-            "trace": self.trace_buffer,
+            "frames": self.trace_frames,
         }
         with open(self.trace_file, "w", encoding="utf-8") as trace_file:
-            json.dump(payload, trace_file, ensure_ascii=False, indent=2)
+            json.dump(payload, trace_file, ensure_ascii=False, separators=(",", ":"))
 
     def update(self, actions, defence_actions):
         self.current_time += TIME_STEP
@@ -369,7 +334,7 @@ class Swarm:
                 agent.status = DroneStatus.DESTROYED
 
         self._cleanup_orders()
-        self._update_traces()
+        self._record_frame()
 
     def summary(self):
         total_orders = self.metrics["orders_completed"] + self.metrics["orders_failed"]
