@@ -1,294 +1,424 @@
-import importlib
+from __future__ import annotations
+
 import json
 import math
-import os.path
+import os
 import random
+from pathlib import Path
+import time
+from typing import Dict, List, Tuple
 
 import numpy as np
 
-from gym.envs.classic_control import rendering
-
-from envs.DefenceAgent import DefenceAgent
-from envs.J20 import J20
-from envs.Radar import Radar
 from envs.Agent import Agent
-
+from envs.DefenceAgent import DefenceAgent, MAX_ORDERS_PER_AGENT
+from envs.Radar import Radar
+from envs.entities import (
+    DRONE_TYPE_CONFIG,
+    DroneStatus,
+    DroneType,
+    Order,
+    OrderStatus,
+    TIME_STEP,
+    WeaponType,
+    clamp,
+    distance,
+)
 import reward_weight.weight01
 
 
-class Swarm(object):
-    """
-    定义环境中的所有智能体，及其状态转移方式
-    """
+class Swarm:
+    """Order-driven confrontation scenario between red drone swarm and blue defence brigades."""
 
-    def __init__(self, agent_num, args_all):
+    def __init__(self, agent_num: int, args_all):
         self.args_all = args_all
-        radar1 = Radar(radar_id='radar1', x=0e3, y=0e3) #head=([-1,1])[random.randint(0,1)]
-        radar2 = Radar(radar_id='radar2', x=0e3, y=10e3) #head=([-1,1])[random.randint(0,1)]
-        radar3 = Radar(radar_id='radar3', x=0e3, y=-10e3)
-        self.radars = [radar1, radar2, radar3]
-        j20_1 = J20(j20_id=0, x=-300e3, y=0, target=[0, 0])
-        j20_2 = J20(j20_id=1, x=-300e3, y=10e3, target=[0, 10e3])
-        j20_3 = J20(j20_id=2, x=-300e3, y=-10e3, target=[0, -10e3])
-        # self.J20 = J20(x=0, y=0, target=[150e3, 0]
+        self.agent_num = agent_num
+        self.current_time = 0.0
+        self.step_count = 0
+        self.random = np.random.RandomState(args_all.seed)
+        self.high_value_targets = [
+            np.array([0.0, 0.0]),
+            np.array([0.0, 7500.0]),
+            np.array([0.0, -7500.0]),
+        ]
+        self._build_blue_network()
+        self.next_order_id = 0
+        self.next_drone_id = 0
+        self.order_pool: List[Order] = []
+        self.order_map: Dict[int, Order] = {}
+        self.agents: List[Agent] = []
+        self.metrics = {
+            "orders_completed": 0,
+            "orders_failed": 0,
+            "threat_neutralised": 0.0,
+            "resource_cost": 0.0,
+            "intercepts": 0,
+            "leaks": 0,
+        }
+        self.trace_dir = None
+        self.trace_file = None
+        self.trace_buffer = {
+            "drones": {},
+            "orders": [],
+            "defence": {},
+            "metrics": [],
+        }
+        self.make_dir()
+        self.reset_state()
 
-        self.J20s = [j20_1, j20_2, j20_3]
-        pos = [
-            [-60e3, 2e3],
-            [-60e3, -2e3],
-            [-60e3, 3e3],
-            [-60e3, -3e3],
-
-            [-80e3, 12e3],
-            [-80e3, 11e3],
-            [-80e3, 10e3],
-            [-80e3, 9e3],
-
-            [-100e3, -12e3],
-            [-100e3, -11e3],
-            [-100e3, -10e3],
-            [-100e3, -9e3],
-        ]  # agent的初始化位置
-        plane_num = len(pos)
-
-        pos_defence = [
-            [-40e3, 0],
-            [-50e3, 10e3],
-            [-60e3, -10e3],
+    def _build_blue_network(self):
+        self.radar_grid = [
+            Radar("radar_central", -5000.0, 0.0),
+            Radar("radar_north", -6000.0, 8000.0),
+            Radar("radar_south", -6000.0, -8000.0),
+        ]
+        brigade_positions = [
+            (-3000.0, 0.0),
+            (-3000.0, 8000.0),
+            (-3000.0, -8000.0),
+        ]
+        self.defence_agents = [
+            DefenceAgent(agent_id=i, init_pos=brigade_positions[i], env=self, reward_weight={})
+            for i in range(self.agent_num)
         ]
 
+    def make_dir(self):
+        base = Path(os.path.abspath("./")) / "trace" / self.args_all.scenario_name
+        render_dir = base / ("render" if self.args_all.use_render else "train")
+        render_dir.mkdir(parents=True, exist_ok=True)
+        self.trace_dir = render_dir
 
-        self.agents = [Agent(
-            agent_id=agent_id,
-            init_pos=pos[agent_id],
-            env=self,
-            reward_weight=self.args_all.reward_weight,
-            J_20=self.J20s[agent_id//4],
-        ) for agent_id in range(plane_num)]
-        self.defence_agents = [DefenceAgent(
-            agent_id=agent_id,
-            init_pos=pos_defence[agent_id],
-            env=self,
-            reward_weight=self.args_all.reward_weight,
-
-        ) for agent_id in range(3)]
-        self.agent_num = agent_num
-
-        self.radar_allocate()  # 为无人机分配雷达目标
-        self.cover_allocate()  # 为无人机分配我方掩护目标
-
-        self.itr = 0  # 迭代步数控制
-        self.save_dir = None  # 存储轨迹json文件的文件夹路径
-        self.make_dir()
-        self.file_num = len(os.listdir(self.save_dir))
-        self.trace_file = f"{self.save_dir}/run{self.file_num}.json"
-
-        self.dic = {
-            'J20': {},
-            'agents': {},
-            'radars': {},
-            'defence_agents': {},
-        }  # 用于存储各个实体（雷达、无人机等）的轨迹，用于后续画图
-
-        # 以下两个for循环用于完成对self.dic的agents和radars部分的初始化
-        for agent in self.agents:
-            temp = {
-                'x': [],
-                'y': [],
-                'heading': [],
-                'reward': [],
-                'hp': [],
-            }
-            self.dic['agents'][agent.agent_id] = temp
-        for j20 in self.J20s:
-            temp = {
-                'x': [],
-                'y': [],
-                'cover_rates': [],
-            }
-            self.dic['J20'][j20.j20_id] = temp
-        for radar in self.radars:
-            self.dic['radars'][radar.radar_id] = {}
-            self.dic['radars'][radar.radar_id]['x'] = []
-            self.dic['radars'][radar.radar_id]['y'] = []
+    def reset_state(self):
+        self.current_time = 0.0
+        self.step_count = 0
+        self.next_order_id = 0
+        self.order_pool.clear()
+        self.order_map.clear()
+        self.metrics = {k: 0 for k in self.metrics}
+        self.trace_buffer = {
+            "drones": {},
+            "orders": [],
+            "defence": {},
+            "metrics": [],
+        }
+        self._start_trace_file()
         for defence_agent in self.defence_agents:
-            temp = {
-                'x': [],
-                'y': [],
-                'reward': [],
-                'attack_x': [],
-                'attack_y': [],
-                'hp': [],
+            self.trace_buffer["defence"][defence_agent.agent_id] = {
+                "reward": [],
+                "attack_position": [],
+                "available_orders": [],
             }
-            self.dic['defence_agents'][defence_agent.agent_id] = temp
+        self.agents = []
+        self._spawn_wave()
+        self._flush_trace()
 
-    def radar_allocate(self):
-        for agent in self.agents:
-            agent.radar = self.radars[agent.agent_id // 4]
-            agent.radar.agents.append(agent)
+    def _spawn_wave(self):
+        wave_size = 30
+        counts = {
+            DroneType.ATTACK: int(wave_size * 0.8),
+            DroneType.RECON: max(1, int(wave_size * 0.1)),
+            DroneType.EW: max(1, wave_size - int(wave_size * 0.8) - int(wave_size * 0.1)),
+        }
+        spawn_radius = 28000.0
+        for drone_type, count in counts.items():
+            for _ in range(count):
+                angle = self.random.uniform(-math.pi / 4, math.pi / 4)
+                x = -spawn_radius
+                y = self.random.uniform(-9000.0, 9000.0) + np.tan(angle) * 4000.0
+                target = random.choice(self.high_value_targets)
+                agent = Agent(
+                    agent_id=self.next_drone_id,
+                    init_pos=(x, y),
+                    env=self,
+                    drone_type=drone_type,
+                    target=tuple(target),
+                )
+                agent.wave_id = 0
+                self.agents.append(agent)
+                self.trace_buffer["drones"][agent.agent_id] = {"x": [], "y": [], "hp": [], "status": []}
+                self.next_drone_id += 1
 
-    def cover_allocate(self):
+    def pick_secondary_target(self, drone_type: DroneType, direction_vector: np.ndarray) -> np.ndarray:
+        base_target = random.choice(self.high_value_targets)
+        offset = direction_vector * self.random.uniform(1500.0, 4000.0)
+        return base_target + offset
+
+    def _sector_for(self, position: np.ndarray) -> int:
+        if position[1] > 4000.0:
+            return 1
+        if position[1] < -4000.0:
+            return 2
+        return 0
+
+    def _ensure_order(self, drone: Agent):
+        if drone.agent_id in self.order_map:
+            order = self.order_map[drone.agent_id]
+            order.position = tuple(drone.position)
+            order.heading = drone.heading_rad()
+            order.velocity = drone.current_speed()
+            order.estimated_time_to_target = drone.time_to_target()
+            order.priority = self._compute_priority(drone, order.threat_level)
+            order.target_sector = self._sector_for(drone.position)
+            return
+
+        threat = self._compute_threat(drone)
+        priority = self._compute_priority(drone, threat)
+        order = Order(
+            order_id=self.next_order_id,
+            drone_id=drone.agent_id,
+            threat_level=threat,
+            priority=priority,
+            position=tuple(drone.position),
+            heading=drone.heading_rad(),
+            velocity=drone.current_speed(),
+            time_created=self.current_time,
+            estimated_time_to_target=drone.time_to_target(),
+            target_sector=self._sector_for(drone.position),
+            drone_type=drone.type,
+        )
+        self.order_pool.append(order)
+        self.order_map[drone.agent_id] = order
+        self.next_order_id += 1
+
+    def _compute_priority(self, drone: Agent, threat: float) -> float:
+        tti = clamp(drone.time_to_target() / 180.0, 0.0, 1.0)
+        return clamp(0.6 * threat + 0.4 * (1.0 - tti), 0.0, 1.0)
+
+    def _compute_threat(self, drone: Agent) -> float:
+        role = DRONE_TYPE_CONFIG[drone.type]["role_value"]
+        distance_factor = clamp(1.0 - distance(tuple(drone.position), tuple(random.choice(self.high_value_targets))) / 30000.0, 0.0, 1.0)
+        time_factor = clamp(1.0 - drone.time_to_target() / 180.0, 0.0, 1.0)
+        return clamp(0.5 * role + 0.3 * distance_factor + 0.2 * time_factor, 0.0, 1.0)
+
+    def _cleanup_orders(self):
+        active_orders = []
+        lookup = self._drone_lookup()
+        for order in self.order_pool:
+            drone = lookup.get(order.drone_id)
+            if drone is None or drone.is_destroyed():
+                if drone is None or not getattr(drone, "leaked", False):
+                    order.status = OrderStatus.COMPLETED
+                    self.metrics["orders_completed"] += 1
+                    self.metrics["threat_neutralised"] += order.threat_level
+                else:
+                    order.status = OrderStatus.FAILED
+                    self.metrics["orders_failed"] += 1
+                continue
+            if getattr(drone, "leaked", False):
+                order.status = OrderStatus.FAILED
+                self.metrics["orders_failed"] += 1
+                continue
+            if self.current_time - order.time_created > 120.0:
+                order.status = OrderStatus.FAILED
+                self.metrics["orders_failed"] += 1
+                continue
+            active_orders.append(order)
+        self.order_pool = active_orders
+        self.order_map = {order.drone_id: order for order in self.order_pool}
+
+    def _drone_lookup(self) -> Dict[int, Agent]:
+        return {agent.agent_id: agent for agent in self.agents if not agent.is_destroyed()}
+
+    def _assign_orders_to_defence(self):
+        lookup = self._drone_lookup()
+        orders_by_sector = {0: [], 1: [], 2: []}
+        for order in self.order_pool:
+            if order.status in (OrderStatus.PENDING, OrderStatus.ASSIGNED):
+                orders_by_sector[order.target_sector].append(order)
+        for agent in self.defence_agents:
+            sector_idx = min(max(orders_by_sector.keys()), agent.agent_id)
+            sector_orders = sorted(orders_by_sector[sector_idx], key=lambda o: o.priority, reverse=True)
+            agent.set_available_orders(sector_orders)
+
+    def _start_trace_file(self):
+        if self.trace_dir is None:
+            return
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        base_name = f"run_{timestamp}"
+        suffix = 0
+        trace_path = self.trace_dir / f"{base_name}.json"
+        while trace_path.exists():
+            suffix += 1
+            trace_path = self.trace_dir / f"{base_name}_{suffix}.json"
+        self.trace_file = trace_path
+
+    def _update_traces(self):
         for agent in self.agents:
-            agent.J20 = self.J20s[0]
+            buf = self.trace_buffer["drones"].setdefault(
+                agent.agent_id, {"x": [], "y": [], "hp": [], "status": []}
+            )
+            buf["x"].append(float(agent.position[0]))
+            buf["y"].append(float(agent.position[1]))
+            buf["hp"].append(float(agent.hp))
+            buf["status"].append(agent.status.name)
+
+        orders_snapshot = []
+        for order in self.order_pool:
+            orders_snapshot.append(
+                {
+                    "order_id": int(order.order_id),
+                    "drone_id": int(order.drone_id),
+                    "threat": float(order.threat_level),
+                    "priority": float(order.priority),
+                    "time_to_target": float(order.estimated_time_to_target),
+                    "position": [float(order.position[0]), float(order.position[1])],
+                    "status": order.status.name,
+                    "weapon_assigned_to": order.assigned_to,
+                }
+            )
+        self.trace_buffer["orders"].append(
+            {
+                "step": int(self.step_count),
+                "time": float(self.current_time),
+                "orders": orders_snapshot,
+            }
+        )
+
+        for defence_agent in self.defence_agents:
+            defence_buf = self.trace_buffer["defence"].setdefault(
+                defence_agent.agent_id,
+                {
+                    "reward": [],
+                    "attack_position": [],
+                    "available_orders": [],
+                },
+            )
+            defence_buf["reward"].append(float(defence_agent.reward))
+            defence_buf["attack_position"].append(
+                [float(defence_agent.attack_position[0]), float(defence_agent.attack_position[1])]
+            )
+            defence_buf["available_orders"].append(
+                [order.order_id for order in getattr(defence_agent, "_available_orders", [])]
+            )
+
+        metric_entry = {
+            "time": float(self.current_time),
+            "step": int(self.step_count),
+        }
+        for key, value in self.metrics.items():
+            if isinstance(value, (np.floating, float)):
+                metric_entry[key] = float(value)
+            else:
+                metric_entry[key] = int(value)
+        self.trace_buffer["metrics"].append(metric_entry)
+        self._flush_trace()
+
+    def _flush_trace(self):
+        if self.trace_file is None:
+            return
+        payload = {
+            "scenario": self.args_all.scenario_name,
+            "seed": self.args_all.seed,
+            "current_time": float(self.current_time),
+            "step": int(self.step_count),
+            "metrics": {
+                key: float(val) if isinstance(val, (np.floating, float)) else int(val)
+                for key, val in self.metrics.items()
+            },
+            "trace": self.trace_buffer,
+        }
+        with open(self.trace_file, "w", encoding="utf-8") as trace_file:
+            json.dump(payload, trace_file, ensure_ascii=False, indent=2)
 
     def update(self, actions, defence_actions):
-        """
-        actions: n个agent的动作的集合，actions[i]为第i+1个agent的动作向量，
-        actions的形状为agent_num行，action_dim列
-        """
-        self.itr += 1
-
-        for j20 in self.J20s:
-            j20.update()
-        for radar in self.radars:
-            radar.update()
-
-        for i, agent in enumerate(self.agents):
-            agent.update(actions[i])
-        for i, agent in enumerate(self.defence_agents):
-            agent.update(defence_actions[i])
-        if self.args_all.use_render:
-            self.log_update()
-
-        # 当我方飞机飞行到一定距离后，重置整个环境，不等式右边目前只是用于测试功能，后续可以进行修改
-        # if self.J20.x >= self.radars[0].x - 40000:
-        #     self.reset()
-
-    def log_update(self):
+        self.current_time += TIME_STEP
+        self.step_count += 1
         for agent in self.agents:
-            self.dic['agents'][agent.agent_id]['x'].append(agent.x)
-            self.dic['agents'][agent.agent_id]['y'].append(agent.y)
-            self.dic['agents'][agent.agent_id]['heading'].append(agent.heading)
-            self.dic['agents'][agent.agent_id]['hp'].append(agent.hp)
-        # for itr, radar in enumerate(self.radars):
-        #     self.dic['radars'][radar.radar_id]['x'].append(radar.x)
-        #     self.dic['radars'][radar.radar_id]['y'].append(radar.y)
-        #
-        # for itr, j20 in enumerate(self.J20s):
-        #     self.dic['J20'][itr]['x'].append(j20.x)
-        #     self.dic['J20'][itr]['y'].append(j20.y)
+            agent.step()
 
-        for agent in self.defence_agents:
-            self.dic['defence_agents'][agent.agent_id]['x'].append(agent.x)
-            self.dic['defence_agents'][agent.agent_id]['y'].append(agent.y)
-            self.dic['defence_agents'][agent.agent_id]['reward'].append(agent.reward)
-            self.dic['defence_agents'][agent.agent_id]['attack_x'].append(agent.attack_position[0])
-            self.dic['defence_agents'][agent.agent_id]['attack_y'].append(agent.attack_position[1])
-            self.dic['defence_agents'][agent.agent_id]['hp'].append(agent.hp)
+        stable_tracks = []
+        for radar in self.radar_grid:
+            stable, _ = radar.scan(self.agents, self.current_time)
+            stable_tracks.extend(stable)
 
+        for drone in stable_tracks:
+            if drone.is_active():
+                self._ensure_order(drone)
 
-        if self.args_all.use_render:
-            if self.itr + 1 == self.args_all.max_step:
-                with open(self.trace_file, 'w') as fo:
-                    json.dump(self.dic, fo, indent=4)
-        else:
-            pass
-            # if self.itr % 200 == 0:
-            #     with open(self.trace_file, 'w') as fo:
-            #         json.dump(self.dic, fo, indent=4)
+        self._cleanup_orders()
+        self._assign_orders_to_defence()
+        drone_lookup = self._drone_lookup()
 
-    def make_dir(self):
-        from pathlib import Path
-        if self.args_all.use_render:
-            self.save_dir = Path(
-                os.path.abspath("./") + "/trace"
-            ) / self.args_all.scenario_name / "render"
-        else:
-            self.save_dir = Path(
-                os.path.abspath("./") + "/trace"
-            ) / self.args_all.scenario_name / "train"
-        if not self.save_dir.exists():
-            os.makedirs(str(self.save_dir))
+        outcomes = []
+        for defence_agent, action in zip(self.defence_agents, defence_actions):
+            outcome = defence_agent.update(action, drone_lookup)
+            outcomes.append(outcome)
+            if outcome.order_id is None:
+                continue
+            if outcome.weapon_type == WeaponType.EW:
+                self.metrics["resource_cost"] += outcome.cost
+                continue
+            if outcome.success:
+                self.metrics["orders_completed"] += 1
+                if outcome.kill:
+                    self.metrics["intercepts"] += 1
+                    self.metrics["threat_neutralised"] += outcome.threat
+                self.metrics["resource_cost"] += outcome.cost
+            elif not outcome.success and outcome.order_id is not None:
+                self.metrics["orders_failed"] += 1
+                self.metrics["resource_cost"] += outcome.cost
+
+        for agent in self.agents:
+            if agent.status == DroneStatus.INFILTRATED and not agent.leaked:
+                self.metrics["leaks"] += 1
+                sector = self._sector_for(agent.position)
+                for defence_agent in self.defence_agents:
+                    if defence_agent.agent_id == sector:
+                        defence_agent.reward -= 15.0
+                agent.leaked = True
+                agent.status = DroneStatus.DESTROYED
+
+        self._cleanup_orders()
+        self._update_traces()
+
+    def summary(self):
+        total_orders = self.metrics["orders_completed"] + self.metrics["orders_failed"]
+        intercept_rate = 0.0
+        if total_orders > 0:
+            intercept_rate = self.metrics["intercepts"] / max(1, total_orders)
+        return {
+            "orders": total_orders,
+            "completed": self.metrics["orders_completed"],
+            "failed": self.metrics["orders_failed"],
+            "intercepts": self.metrics["intercepts"],
+            "leaks": self.metrics["leaks"],
+            "threat_neutralised": self.metrics["threat_neutralised"],
+            "resource_cost": self.metrics["resource_cost"],
+            "intercept_rate": intercept_rate,
+        }
 
     def reset(self):
-        self.__init__(agent_num=len(self.agents), args_all=self.args_all)
+        self.reset_state()
 
 
-class MyEnv(object):
+class MyEnv:
     """
-    调用Swarm类，与light-mappo作者提供的环境接口进行交互
+    Gym-like wrapper exposing the swarm scenario to the training loop.
     """
 
     def __init__(self, args_all):
-        # with open(os.path.abspath(f"./reward_weight/{args_all.scenario_name}.json"), 'r') as fo:
-        #     temp = json.load(fo)
         args_all.reward_weight = reward_weight.weight01
-        self.agent_num = args_all.num_agents  # 设置智能体(小飞机)的个数
+        self.agent_num = args_all.num_agents
         self.swarm = Swarm(agent_num=self.agent_num, args_all=args_all)
-        self.obs_dim = len(self.swarm.defence_agents[0].obs)  # 设置智能体的观测维度
-        self.action_dim = self.swarm.defence_agents[0].action_dim  # 设置智能体的动作维度
+        self.obs_dim = len(self.swarm.defence_agents[0].get_obs())
+        self.action_dim = self.swarm.defence_agents[0].action_dim
         self.viewer = None
 
     def reset(self):
         self.swarm.reset()
-        sub_agent_obs = []
-        for ag in self.swarm.agents:
-            sub_agent_obs.append(np.array(ag.obs))
-
-        sub_defence_agent_obs = []
-        for ag in self.swarm.defence_agents:
-            sub_defence_agent_obs.append(np.array(ag.obs))
-        return sub_agent_obs, sub_defence_agent_obs
+        plane_obs = [agent.snapshot() for agent in self.swarm.agents]
+        defence_obs = [np.array(agent.get_obs(), dtype=np.float32) for agent in self.swarm.defence_agents]
+        return plane_obs, defence_obs
 
     def step(self, actions, defence_actions):
-        sub_agent_obs = []
-        sub_plane_obs = []
-        sub_agent_reward = []
-        sub_agent_done = []
-        sub_agent_info = []
+        self.swarm.update(actions, defence_actions)
 
-        self.swarm.update(actions=actions, defence_actions=defence_actions)
-        for agent in self.swarm.agents:
-            sub_plane_obs.append(np.array(agent.obs))
+        plane_obs = [agent.snapshot() for agent in self.swarm.agents]
+        defence_obs = [np.array(agent.get_obs(), dtype=np.float32) for agent in self.swarm.defence_agents]
+        rewards = [agent.reward for agent in self.swarm.defence_agents]
+        done = [False for _ in self.swarm.defence_agents]
+        info = [{"metrics": self.swarm.summary()} for _ in self.swarm.defence_agents]
+        return [plane_obs, defence_obs, rewards, done, info]
 
-        for agent in self.swarm.defence_agents:
-            sub_agent_obs.append(np.array(agent.obs))
-            sub_agent_reward.append(agent.reward)
-            sub_agent_done.append(agent.is_done())
-            sub_agent_info.append({})
-
-        return [sub_plane_obs,sub_agent_obs, sub_agent_reward, sub_agent_done, sub_agent_info]
-
-    def render(self, mode='human'):
-        screen_width = 1000
-        screen_height = 1000
-        scal = 200.0
-        Y_add = 100000.0
-        if self.viewer is None:
-            self.viewer = rendering.Viewer(screen_width, screen_height)
-
-        # 雷达位置渲染
-        for radar in self.swarm.radars:
-            radar_point = rendering.make_circle(5)
-            radar_point.set_color(10, 0, 0)
-            position = [radar.x / scal, (radar.y + Y_add) / scal]
-            radar_transform = rendering.Transform(translation=position)
-            radar_point.add_attr(radar_transform)
-            self.viewer.add_onetime(radar_point)
-
-        # 目的地渲染
-        target_point = rendering.make_circle(5)
-        target_point.set_color(100, 0, 0)
-        target_transform = rendering.Transform(
-            translation=(self.swarm.J20.target[0] / scal, (self.swarm.J20.target[1] + Y_add) / scal))
-        target_point.add_attr(target_transform)
-        self.viewer.add_geom(target_point)
-
-        # 掩护J20渲染
-        guard_point = rendering.make_circle(5)
-        guard_point.set_color(0, 0, 100)
-        position = [self.swarm.J20.x / scal, (self.swarm.J20.y + Y_add) / scal]
-        guard_transform = rendering.Transform(translation=position)
-        guard_point.add_attr(guard_transform)
-        self.viewer.add_onetime(guard_point)
-
-        # 无人机渲染
-        for ag in self.swarm.agents:
-            UAV_point = rendering.make_circle(4)
-            UAV_point.set_color(0, 100, 0)
-            position = [ag.x / scal, (ag.y + Y_add) / scal]
-            UAV_transform = rendering.Transform(translation=position)
-            UAV_point.add_attr(UAV_transform)
-            self.viewer.add_onetime(UAV_point)
-
-        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+    def render(self, mode="human"):
+        return None

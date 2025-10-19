@@ -11,7 +11,7 @@ def parse_args():
 
     # environment
 
-    parser.add_argument("--seed", type=int, default=1, help="Random seed for numpy/torch")
+    parser.add_argument("--seed", type=int, default=10, help="Random seed for numpy/torch")
     parser.add_argument("--cuda_deterministic",
                         action='store_false', default=True,
                         help="by default, make sure random seed effective. if set, bypass such function.")
@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument('--scenario_name', type=str, default="weight01", help="weight set")
     parser.add_argument("--note",type=str,default="双雷达还原奖励函数，增加对x轴倒飞的惩罚")
 
-    parser.add_argument("--use_render", action='store_true', default=True,
+    parser.add_argument("--use_render", action='store_true', default=False,
                         help="by default, do not render-weight001-60% the env during training. If set, start render-weight001-60%. Note: something, the environment has internal render-weight001-60% process which is not controlled by this hyperparam.")
     parser.add_argument("--trace_dir", type=str, default="MADDPG3-1-radar")
     parser.add_argument("--train", type=bool, default=True)  # True False
@@ -30,7 +30,7 @@ def parse_args():
                         help="directory in which training state and model are loaded")
     parser.add_argument("--plane_model_name", type=str, default="models/2024-06-20-11-53-25/",
                         help="无人机集群模型的路径")
-    parser.add_argument("--old_model_name", type=str, default="models/2024-06-20-11-53-25/",
+    parser.add_argument("--old_model_name", type=str, default="models/2025-10-19-18-23-11/",
                         help="the number of the episode for saving the model")
     parser.add_argument("--log_interval", type=int, default=50,
                         help="time duration between contiunous twice log printing.")
