@@ -35,6 +35,14 @@ STATUS_ALPHA = {
     "MISSING": 0.0,
 }
 
+# defender cooldown/assignment colors
+DEFENDER_COLORS = [
+    "#1f78b4",
+    "#33a02c",
+    "#e31a1c",
+    "#ff7f00",
+]
+
 
 @dataclass
 class DroneTrace:
@@ -81,6 +89,21 @@ def parse_args() -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Print additional diagnostics about the loaded trace.",
+    )
+    parser.add_argument(
+        "--show-orders",
+        action="store_true",
+        help="Display textual information about each order (location, priority, assignment).",
+    )
+    parser.add_argument(
+        "--show-defenders",
+        action="store_true",
+        help="Display defender status badges (current reward, assigned orders, cooldown).",
+    )
+    parser.add_argument(
+        "--show-health",
+        action="store_true",
+        help="Annotate drones with their current HP.",
     )
     return parser.parse_args()
 
@@ -276,15 +299,42 @@ def main():
 
     scatters = []
     trails = []
-    for drone in drones:
+    hp_texts = []
+    for idx, drone in enumerate(drones):
         color = TYPE_COLOR.get(drone.drone_type, "#999999")
         scatter = ax.scatter([], [], s=30, color=color, alpha=0.9, label=f"Drone {drone.drone_id} ({drone.drone_type})")
         trail, = ax.plot([], [], color=color, linewidth=1.2, alpha=0.4)
         scatters.append((scatter, drone))
         trails.append((trail, drone))
+        text = ax.text(0, 0, "", fontsize=8, color=color)
+        hp_texts.append((text, drone))
 
     order_scatter = ax.scatter([], [], s=15, color="#f1c40f", alpha=0.5, marker="x", label="Active Orders")
     legend = ax.legend(loc="upper right", framealpha=0.85)
+
+    order_text = ax.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax.transAxes,
+        fontsize=9,
+        va="top",
+        ha="left",
+        color="#f39c12",
+        family="monospace",
+    )
+
+    defender_text = ax.text(
+        0.98,
+        0.98,
+        "",
+        transform=ax.transAxes,
+        fontsize=9,
+        va="top",
+        ha="right",
+        color="#2ecc71",
+        family="monospace",
+    )
 
     def update(frame: int):
         for (scatter, drone), (trail, drone_for_trail) in zip(scatters, trails):
@@ -301,6 +351,19 @@ def main():
                 scatter.set_offsets([np.nan, np.nan])
                 trail.set_data([], [])
 
+        if args.show_health:
+            for (text, drone) in hp_texts:
+                if frame < drone.x.size and not np.isnan(drone.x[frame]):
+                    text.set_position((drone.x[frame] + 200.0, drone.y[frame] + 200.0))
+                    hp_value = drone.hp[frame] if frame < drone.hp.size else 0.0
+                    text.set_text(f"HP {hp_value:5.1f}")
+                    text.set_visible(True)
+                else:
+                    text.set_visible(False)
+        else:
+            for text, _ in hp_texts:
+                text.set_visible(False)
+
         if frame < len(orders):
             order_entries = orders[frame]
             if order_entries:
@@ -316,8 +379,52 @@ def main():
         else:
             order_scatter.set_offsets(np.empty((0, 2)))
 
+        if args.show_orders and frame < len(frames):
+            order_lines = ["Orders:"]
+            order_entries = frames[frame].get("orders", [])
+            for entry in order_entries[:8]:
+                assigned = entry.get("assigned_to")
+                assigned_txt = f"a{assigned}" if assigned is not None else "--"
+                order_lines.append(
+                    f"#{entry['id']:03d} d{entry['drone_id']:02d} "
+                    f"p={entry['priority']:.2f} th={entry['threat']:.2f} "
+                    f"{assigned_txt}"
+                )
+            if len(order_entries) > 8:
+                order_lines.append(f"... +{len(order_entries) - 8} more")
+            order_text.set_text("\n".join(order_lines))
+            order_text.set_visible(True)
+        else:
+            order_text.set_visible(False)
+
+        if args.show_defenders and frame < len(frames):
+            defender_lines = ["Defenders:"]
+            defender_entries = frames[frame].get("defenders", [])
+            for entry in defender_entries:
+                cooldowns = entry.get("cooldowns", {})
+                cd_str = ", ".join(
+                    f"{k[:3]}:{v:.1f}"
+                    for k, v in sorted(cooldowns.items())
+                    if v > 0
+                )
+                orders_str = ",".join(str(o) for o in entry.get("orders", []))
+                defender_lines.append(
+                    f"B{entry['id']}: r={entry['reward']:+5.1f} "
+                    f"orders[{orders_str}] {cd_str}"
+                )
+            defender_text.set_text("\n".join(defender_lines))
+            defender_text.set_visible(True)
+        else:
+            defender_text.set_visible(False)
+
         legend.set_title(f"Step {frame + 1}/{num_frames}")
-        return [scatter for scatter, _ in scatters] + [trail for trail, _ in trails] + [order_scatter, legend]
+        artists = (
+            [scatter for scatter, _ in scatters]
+            + [trail for trail, _ in trails]
+            + [txt for txt, _ in hp_texts]
+            + [order_scatter, legend, order_text, defender_text]
+        )
+        return artists
 
     anim = animation.FuncAnimation(
         fig,

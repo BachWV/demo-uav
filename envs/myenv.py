@@ -252,6 +252,8 @@ class Swarm:
                     "x": float(order.position[0]),
                     "y": float(order.position[1]),
                     "status": order.status.name,
+                    "assigned_to": int(order.assigned_to) if order.assigned_to is not None else None,
+                    "birthed": float(order.time_created),
                 }
                 for order in self.order_pool
             ],
@@ -260,6 +262,10 @@ class Swarm:
                     "id": int(defence_agent.agent_id),
                     "reward": float(defence_agent.reward),
                     "orders": [order.order_id for order in getattr(defence_agent, "_available_orders", [])],
+                    "cooldowns": {
+                        weapon.name: defence_agent.weapon_modules[weapon].cooldown_timer
+                        for weapon in defence_agent.weapon_modules
+                    },
                 }
                 for defence_agent in self.defence_agents
             ],
