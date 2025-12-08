@@ -2,3 +2,5 @@ models/
 .vscode/
 trace/
 .idea/
+runs/tensorboard
+*.pyc

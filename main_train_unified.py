@@ -1,0 +1,356 @@
+"""
+统一训练入口，支持MADDPG和GRPO算法
+使用 --use_grpo 参数切换算法
+"""
+
+import time
+import numpy as np
+import torch
+from torch.utils.tensorboard import SummaryWriter
+
+from MARL.arguments import parse_args
+from envs.myenv import MyEnv
+
+# MADDPG imports
+from MARL.replay_buffer import ReplayBuffer
+from MARL.train_util import get_trainers, agents_train, save_model_now, get_eval_actor
+
+# GRPO imports
+from MARL.grpo_buffer import GRPOBuffer
+from MARL.train_util_grpo import get_grpo_trainers, grpo_update, save_grpo_model, get_eval_grpo_actor
+
+
+def train_maddpg(arglist, env, writer):
+    """MADDPG训练逻辑"""
+    state_dim = env.obs_dim
+    action_dim = env.action_dim
+    memory = ReplayBuffer(arglist.memory_size)
+    
+    print("初始化MADDPG智能体")
+    env_agent = arglist.num_agents
+    obs_shape_n = [state_dim for _ in range(env_agent)]
+    action_shape_n = [action_dim for _ in range(env_agent)]
+
+    actors_cur, critics_cur, actors_tar, critics_tar, optimizers_a, optimizers_c = get_trainers(
+        env_agent, obs_shape_n, action_shape_n, arglist
+    )
+
+    action_size = []
+    obs_size = []
+    head_o, head_a, end_o, end_a = 0, 0, 0, 0
+    for obs_shape, action_shape in zip(obs_shape_n, action_shape_n):
+        end_o += obs_shape
+        end_a += action_shape
+        obs_size.append((head_o, end_o))
+        action_size.append((head_a, end_a))
+        head_o = end_o
+        head_a = end_a
+
+    print("开始MADDPG训练.......")
+    start_time = time.time()
+    game_step = 0
+    model_update_cnt = 0
+
+    try:
+        for episode_gone in range(arglist.max_episode):
+            plane_obs, defence_obs = env.reset()
+            sum_episode_reward = 0.0
+            agent_episode_reward = [0.0] * env_agent
+
+            for episode_step in range(arglist.max_step):
+                defence_obs_array = np.stack(defence_obs)
+                defence_obs_tensor = torch.from_numpy(defence_obs_array).to(arglist.device, torch.float)
+
+                defence_action_n = [agent(obs) for agent, obs in zip(actors_cur, defence_obs_tensor)]
+                defence_action_n_2d = torch.stack(defence_action_n)
+                defence_action_n = defence_action_n_2d.detach().cpu().numpy()
+
+                new_plane_obs, new_defence_obs, rew_n, done_n, info = env.step(None, defence_action_n)
+
+                memory.add(defence_obs, np.concatenate(defence_action_n), rew_n, new_defence_obs, done_n)
+
+                agent_episode_reward = np.add(rew_n, agent_episode_reward)
+                sum_episode_reward += float(np.sum(rew_n))
+
+                plane_obs = new_plane_obs
+                defence_obs = new_defence_obs
+                game_step += 1
+
+            model_update_cnt, actors_cur, actors_tar, critics_cur, critics_tar = agents_train(
+                arglist,
+                game_step,
+                model_update_cnt,
+                memory,
+                obs_size,
+                action_size,
+                actors_cur,
+                actors_tar,
+                critics_cur,
+                critics_tar,
+                optimizers_a,
+                optimizers_c,
+            )
+            
+            if episode_gone == arglist.max_episode - 1:
+                save_model_now(arglist, actors_cur, actors_tar, critics_cur, critics_tar)
+            
+            writer.add_scalar("train_episode_rewards", sum_episode_reward / env_agent, global_step=episode_gone)
+            
+            # Log custom metrics
+            if info:
+                metrics = info[0]['metrics']
+                writer.add_scalar("metrics/order_completion_rate", metrics['order_completion_rate'], episode_gone)
+                writer.add_scalar("metrics/avg_order_time", metrics['avg_order_time'], episode_gone)
+                writer.add_scalar("metrics/interception_rate", metrics['interception_rate'], episode_gone)
+                writer.add_scalar("metrics/resource_efficiency", metrics['resource_efficiency'], episode_gone)
+                writer.add_scalar("metrics/threat_neutralization_rate", metrics['threat_neutralization_rate'], episode_gone)
+            
+            print("=MADDPG Training episode: ", episode_gone, "    episode reward: ", agent_episode_reward)
+
+            if (episode_gone + 1) % arglist.log_interval == 0:
+                end_time = time.time()
+                minute = float(end_time - start_time) / 60
+                remaining = minute * (arglist.max_episode - episode_gone - 1) / arglist.log_interval
+                print(f"每{arglist.log_interval}轮, 本轮耗时{minute:.2f}分钟, 预计剩余{remaining:.2f}分钟")
+                start_time = end_time
+
+    except KeyboardInterrupt:
+        str_input = input("y for save\n")
+        if str_input.startswith("y"):
+            save_model_now(arglist, actors_cur, actors_tar, critics_cur, critics_tar)
+
+
+def train_grpo(arglist, env, writer):
+    """GRPO训练逻辑"""
+    state_dim = env.obs_dim
+    action_dim = env.action_dim
+    
+    buffer = GRPOBuffer(
+        max_episodes=arglist.grpo_buffer_size,
+        max_steps=arglist.max_step,
+        num_agents=arglist.num_agents,
+        obs_dim=state_dim,
+        action_dim=1,
+        device=arglist.device
+    )
+    
+    print("初始化GRPO智能体")
+    env_agent = arglist.num_agents
+    obs_shape_n = [state_dim for _ in range(env_agent)]
+    action_shape_n = [action_dim for _ in range(env_agent)]
+
+    actors, critics, optimizers_a, optimizers_c = get_grpo_trainers(
+        env_agent, obs_shape_n, action_shape_n, arglist
+    )
+
+    print("开始GRPO训练.......")
+    start_time = time.time()
+    episode_count = 0
+    update_count = 0
+
+    try:
+        for episode_gone in range(arglist.max_episode):
+            plane_obs, defence_obs = env.reset()
+            sum_episode_reward = 0.0
+            agent_episode_reward = [0.0] * env_agent
+
+            for episode_step in range(arglist.max_step):
+                defence_obs_array = np.stack(defence_obs)
+                defence_obs_tensor = torch.from_numpy(defence_obs_array).to(arglist.device, torch.float)
+
+                actions_list = []
+                log_probs_list = []
+                values_list = []
+
+                for agent_idx, (actor, critic, obs_t) in enumerate(zip(actors, critics, defence_obs_tensor)):
+                    action, log_prob, _ = actor.sample_action(obs_t.unsqueeze(0), deterministic=False)
+                    value = critic(obs_t.unsqueeze(0))
+                    
+                    actions_list.append(action.item())
+                    log_probs_list.append(log_prob.item())
+                    values_list.append(value.item())
+
+                defence_action_n = np.array(actions_list)
+                new_plane_obs, new_defence_obs, rew_n, done_n, info = env.step(None, defence_action_n)
+
+                buffer.add_step(
+                    obs=defence_obs,
+                    actions=actions_list,
+                    log_probs=log_probs_list,
+                    rewards=rew_n,
+                    dones=done_n,
+                    values=values_list
+                )
+
+                agent_episode_reward = np.add(rew_n, agent_episode_reward)
+                sum_episode_reward += float(np.sum(rew_n))
+
+                plane_obs = new_plane_obs
+                defence_obs = new_defence_obs
+
+            buffer.finish_episode()
+            episode_count += 1
+
+            if episode_count % arglist.grpo_update_interval == 0:
+                print(f"Updating GRPO policy at episode {episode_gone}...")
+                buffer_data = buffer.get_all_data()
+                
+                for epoch in range(arglist.grpo_epochs):
+                    loss_stats = grpo_update(
+                        arglist, buffer_data, actors, critics,
+                        optimizers_a, optimizers_c
+                    )
+                    
+                    if loss_stats is not None:
+                        writer.add_scalar("grpo/actor_loss", loss_stats['actor_loss'], update_count)
+                        writer.add_scalar("grpo/critic_loss", loss_stats['critic_loss'], update_count)
+                        writer.add_scalar("grpo/entropy", loss_stats['entropy'], update_count)
+                
+                buffer.clear()
+                update_count += 1
+                print(f"GRPO update {update_count} completed.")
+
+            if episode_gone == arglist.max_episode - 1:
+                save_grpo_model(arglist, actors, critics)
+            
+            writer.add_scalar("train_episode_rewards", sum_episode_reward / env_agent, global_step=episode_gone)
+            
+            # Log custom metrics
+            if info:
+                metrics = info[0]['metrics']
+                writer.add_scalar("metrics/order_completion_rate", metrics['order_completion_rate'], episode_gone)
+                writer.add_scalar("metrics/avg_order_time", metrics['avg_order_time'], episode_gone)
+                writer.add_scalar("metrics/interception_rate", metrics['interception_rate'], episode_gone)
+                writer.add_scalar("metrics/resource_efficiency", metrics['resource_efficiency'], episode_gone)
+                writer.add_scalar("metrics/threat_neutralization_rate", metrics['threat_neutralization_rate'], episode_gone)
+
+            print("=GRPO Training episode: ", episode_gone, "    episode reward: ", agent_episode_reward)
+
+            if (episode_gone + 1) % arglist.log_interval == 0:
+                end_time = time.time()
+                minute = float(end_time - start_time) / 60
+                remaining = minute * (arglist.max_episode - episode_gone - 1) / arglist.log_interval
+                print(f"每{arglist.log_interval}轮, 本轮耗时{minute:.2f}分钟, 预计剩余{remaining:.2f}分钟")
+                start_time = end_time
+
+    except KeyboardInterrupt:
+        str_input = input("y for save\n")
+        if str_input.startswith("y"):
+            save_grpo_model(arglist, actors, critics)
+
+
+def train(arglist):
+    """统一训练入口"""
+    if torch.cuda.is_available():
+        print("choose to use gpu...")
+        torch.set_num_threads(arglist.n_training_threads)
+        if arglist.cuda_deterministic:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+
+    torch.manual_seed(arglist.seed)
+    torch.cuda.manual_seed_all(arglist.seed)
+    np.random.seed(arglist.seed)
+
+    env = MyEnv(args_all=arglist)
+    print("环境初始化完成")
+
+    algo_name = "GRPO" if arglist.use_grpo else "MADDPG"
+    writer = SummaryWriter(
+        log_dir=f"runs/tensorboard/{algo_name}_dispatch_{time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime())}"
+    )
+    
+    print(f"\n========== 使用算法: {algo_name} ==========\n")
+
+    if arglist.use_grpo:
+        train_grpo(arglist, env, writer)
+    else:
+        train_maddpg(arglist, env, writer)
+    
+    writer.close()
+
+
+def eval(arglist, online_render):
+    """统一评估入口"""
+    if torch.cuda.is_available():
+        print("choose to use gpu...")
+        torch.set_num_threads(arglist.n_training_threads)
+        if arglist.cuda_deterministic:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+
+    torch.manual_seed(arglist.seed)
+    torch.cuda.manual_seed_all(arglist.seed)
+    np.random.seed(arglist.seed)
+
+    env = MyEnv(args_all=arglist)
+    print("环境初始化完成")
+
+    env_agent = arglist.num_agents
+    
+    if arglist.use_grpo:
+        print("使用GRPO模型评估")
+        actors = get_eval_grpo_actor(env_agent, arglist)
+    else:
+        print("使用MADDPG模型评估")
+        actors = get_eval_actor(env_agent, arglist)
+
+    print("开始评估.......")
+    for episode_gone in range(arglist.eval_episode):
+        sum_episode_reward = 0.0
+        agent_episode_reward = [0.0] * env_agent
+        plane_obs, defence_obs = env.reset()
+        print("Episode ", episode_gone)
+
+        for episode_step in range(arglist.max_step):
+            defence_obs_array = np.stack(defence_obs)
+            defence_obs_tensor = torch.from_numpy(defence_obs_array).to(arglist.device, torch.float)
+            
+            if arglist.use_grpo:
+                # GRPO evaluation
+                actions_list = []
+                for agent_idx, (actor, obs_t) in enumerate(zip(actors, defence_obs_tensor)):
+                    action, _, _ = actor.sample_action(obs_t.unsqueeze(0), deterministic=True)
+                    actions_list.append(action.item())
+                defence_action = np.array(actions_list)
+            else:
+                # MADDPG evaluation
+                defence_action_n = [agent(obs) for agent, obs in zip(actors, defence_obs_tensor)]
+                defence_action_n_2d = torch.stack(defence_action_n)
+                defence_action = defence_action_n_2d.detach().cpu().numpy()
+
+            _, new_defence_obs, rew_n, done_n, info = env.step(None, defence_action)
+            agent_episode_reward = np.add(rew_n, agent_episode_reward)
+            sum_episode_reward += float(np.sum(rew_n))
+
+            if online_render:
+                env.render()
+                time.sleep(0.01)
+
+            defence_obs = new_defence_obs
+
+        algo_name = "GRPO" if arglist.use_grpo else "MADDPG"
+        print(f"={algo_name} Eval episode: ", episode_gone, "    episode reward: ", agent_episode_reward,
+              " sum: ", sum_episode_reward / env_agent)
+
+
+if __name__ == "__main__":
+    arglist = parse_args()
+    print(f"\n配置参数:")
+    print(f"  算法: {'GRPO' if arglist.use_grpo else 'MADDPG'}")
+    print(f"  训练模式: {arglist.train}")
+    print(f"  智能体数量: {arglist.num_agents}")
+    print(f"  最大训练轮数: {arglist.max_episode}")
+    
+    if arglist.use_grpo:
+        print(f"  GRPO Buffer大小: {arglist.grpo_buffer_size}")
+        print(f"  GRPO更新间隔: {arglist.grpo_update_interval}")
+        print(f"  GRPO训练轮数: {arglist.grpo_epochs}")
+        print(f"  Clip参数: {arglist.clip_param}")
+        print(f"  熵系数: {arglist.entropy_coef}")
+    print()
+    
+    if arglist.train:
+        train(arglist)
+    else:
+        eval(arglist, False)

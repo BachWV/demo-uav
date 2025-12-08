@@ -43,9 +43,9 @@ def parse_args():
     parser.add_argument("--learning_fre", type=int, default=200, help="learning frequency")  # 5
     parser.add_argument("--max_grad_norm", type=float, default=0.5, help="max gradient norm for clip")
     parser.add_argument("--tao", type=int, default=0.01, help="how depth we exchange the par of the nn")
-    parser.add_argument("--lr_a", type=float, default=1e-3, help="learning rate for adam optimizer")
-    parser.add_argument("--lr_c", type=float, default=1e-3, help="learning rate for adam optimizer")
-    parser.add_argument("--gamma", type=float, default=0.95, help="discount factor")
+    parser.add_argument("--lr_a", type=float, default=3e-4, help="learning rate for adam optimizer")
+    parser.add_argument("--lr_c", type=float, default=3e-4, help="learning rate for adam optimizer")
+    parser.add_argument("--gamma", type=float, default=0.99, help="discount factor")
     parser.add_argument("--batch_size", type=int, default=200, help="number of episodes to optimize at the same time")
     parser.add_argument("--memory_size", type=int, default=1e6, help="number of data storedin the memory")
     parser.add_argument("--num_units_openai0", type=int, default=512, help="number of units in the mlp")
@@ -54,11 +54,19 @@ def parse_args():
     parser.add_argument("--num_units_openai3", type=int, default=64, help="number of units in the mlp")
     parser.add_argument("--max_episode", type=int, default=120000, help="number of train")
     parser.add_argument("--eval_episode", type=int, default=100, help="number of eval")
-    parser.add_argument("--max_step", type=int, default=300, help="max number of step")
+    parser.add_argument("--max_step", type=int, default=200, help="max number of step")
     parser.add_argument("--norm", type=bool, default=False)
     parser.add_argument("--reward_norm", type=bool, default=False)
 
-
+    # GRPO specific parameters
+    parser.add_argument("--grpo_buffer_size", type=int, default=20, help="number of episodes to store in GRPO buffer")
+    parser.add_argument("--grpo_update_interval", type=int, default=20, help="update policy every N episodes")
+    parser.add_argument("--grpo_epochs", type=int, default=10, help="number of epochs for GRPO update")
+    parser.add_argument("--clip_param", type=float, default=0.2, help="PPO clip parameter for GRPO")
+    parser.add_argument("--entropy_coef", type=float, default=0.01, help="entropy coefficient for GRPO")
+    parser.add_argument("--gae_lambda", type=float, default=0.95, help="GAE lambda parameter")
+    parser.add_argument("--use_grpo", action="store_true", default=False, help="use GRPO algorithm instead of MADDPG")
+    parser.add_argument("--no_record_metrics", action="store_true", default=False, help="disable metrics recording during training")
 
 
     # check pointing

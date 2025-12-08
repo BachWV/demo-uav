@@ -13,7 +13,7 @@ from matplotlib import animation as ani
 from matplotlib import patches
 from utils.util import check_suppress_plot
 
-trace_file = '../trace/weight01/render/run18.json'
+trace_file = '../trace/weight01/render68300/run68210.json'
 
 
 class Agent(object):

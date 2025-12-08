@@ -54,6 +54,10 @@ class Swarm:
             "resource_cost": 0.0,
             "intercepts": 0,
             "leaks": 0,
+            "total_drones": 0,
+            "high_threat_drones": 0,
+            "neutralized_high_threat": 0,
+            "order_completion_times": [],
         }
         self.trace_dir = None
         self.trace_file = None
@@ -89,7 +93,19 @@ class Swarm:
         self.next_order_id = 0
         self.order_pool.clear()
         self.order_map.clear()
-        self.metrics = {k: 0 for k in self.metrics}
+        # Reset metrics correctly
+        self.metrics = {
+            "orders_completed": 0,
+            "orders_failed": 0,
+            "threat_neutralised": 0.0,
+            "resource_cost": 0.0,
+            "intercepts": 0,
+            "leaks": 0,
+            "total_drones": 0,
+            "high_threat_drones": 0,
+            "neutralized_high_threat": 0,
+            "order_completion_times": [],
+        }
         self.trace_frames = []
         self.agents = []
         self._spawn_wave()
@@ -120,6 +136,7 @@ class Swarm:
                 agent.wave_id = 0
                 self.agents.append(agent)
                 self.next_drone_id += 1
+                self.metrics["total_drones"] += 1
 
     def pick_secondary_target(self, drone_type: DroneType, direction_vector: np.ndarray) -> np.ndarray:
         base_target = random.choice(self.high_value_targets)
@@ -159,6 +176,8 @@ class Swarm:
             target_sector=self._sector_for(drone.position),
             drone_type=drone.type,
         )
+        if threat >= 0.6:
+            self.metrics["high_threat_drones"] += 1
         self.order_pool.append(order)
         self.order_map[drone.agent_id] = order
         self.next_order_id += 1
@@ -183,6 +202,9 @@ class Swarm:
                     order.status = OrderStatus.COMPLETED
                     self.metrics["orders_completed"] += 1
                     self.metrics["threat_neutralised"] += order.threat_level
+                    self.metrics["order_completion_times"].append(self.current_time - order.time_created)
+                    if order.threat_level >= 0.6:
+                        self.metrics["neutralized_high_threat"] += 1
                 else:
                     order.status = OrderStatus.FAILED
                     self.metrics["orders_failed"] += 1
@@ -216,6 +238,8 @@ class Swarm:
     def _start_trace_file(self):
         if self.trace_dir is None:
             return
+        if getattr(self.args_all, "no_record_metrics", False):
+            return
         timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
         base_name = f"run_{timestamp}"
         suffix = 0
@@ -240,6 +264,7 @@ class Swarm:
                     "y": float(agent.position[1]),
                     "hp": float(agent.hp),
                     "status": agent.status.name,
+                    "wave": int(getattr(agent, "wave_id", 0)),
                 }
                 for agent in self.agents
             ],
@@ -272,6 +297,7 @@ class Swarm:
             "metrics": {
                 key: float(val) if isinstance(val, (np.floating, float)) else int(val)
                 for key, val in self.metrics.items()
+                if not isinstance(val, list)
             },
         }
         self.trace_frames.append(frame)
@@ -320,10 +346,8 @@ class Swarm:
                 self.metrics["resource_cost"] += outcome.cost
                 continue
             if outcome.success:
-                self.metrics["orders_completed"] += 1
                 if outcome.kill:
                     self.metrics["intercepts"] += 1
-                    self.metrics["threat_neutralised"] += outcome.threat
                 self.metrics["resource_cost"] += outcome.cost
             elif not outcome.success and outcome.order_id is not None:
                 self.metrics["orders_failed"] += 1
@@ -344,18 +368,44 @@ class Swarm:
 
     def summary(self):
         total_orders = self.metrics["orders_completed"] + self.metrics["orders_failed"]
-        intercept_rate = 0.0
+        total_drones = self.metrics["total_drones"]
+        high_threat_drones = self.metrics["high_threat_drones"]
+        
+        order_completion_rate = 0.0
         if total_orders > 0:
-            intercept_rate = self.metrics["intercepts"] / max(1, total_orders)
+            order_completion_rate = self.metrics["orders_completed"] / total_orders
+            
+        avg_completion_time = 0.0
+        if len(self.metrics["order_completion_times"]) > 0:
+            avg_completion_time = sum(self.metrics["order_completion_times"]) / len(self.metrics["order_completion_times"])
+            
+        interception_rate = 0.0
+        if total_drones > 0:
+            interception_rate = self.metrics["intercepts"] / total_drones
+            
+        threat_neutralization_rate = 0.0
+        if high_threat_drones > 0:
+            threat_neutralization_rate = self.metrics["neutralized_high_threat"] / high_threat_drones
+            
+        resource_efficiency = 0.0
+        if self.metrics["threat_neutralised"] > 0:
+            resource_efficiency = self.metrics["resource_cost"] / self.metrics["threat_neutralised"]
+            
         return {
-            "orders": total_orders,
-            "completed": self.metrics["orders_completed"],
-            "failed": self.metrics["orders_failed"],
+            "orders_total": total_orders,
+            "orders_completed": self.metrics["orders_completed"],
+            "order_completion_rate": order_completion_rate,
+            "avg_order_time": avg_completion_time,
             "intercepts": self.metrics["intercepts"],
-            "leaks": self.metrics["leaks"],
-            "threat_neutralised": self.metrics["threat_neutralised"],
+            "total_drones": total_drones,
+            "interception_rate": interception_rate,
+            "high_threat_drones": high_threat_drones,
+            "neutralized_high_threat": self.metrics["neutralized_high_threat"],
+            "threat_neutralization_rate": threat_neutralization_rate,
             "resource_cost": self.metrics["resource_cost"],
-            "intercept_rate": intercept_rate,
+            "threat_neutralised_total": self.metrics["threat_neutralised"],
+            "resource_efficiency": resource_efficiency,
+            "leaks": self.metrics["leaks"],
         }
 
     def reset(self):
