@@ -20,8 +20,8 @@ def get_grpo_trainers(env_agent, obs_shape_n, action_shape_n, arglist):
     if arglist.restore:
         # Load existing model
         for idx in range(env_agent):
-            actors[idx] = torch.load(arglist.old_model_name + f'grpo_a_{idx}.pt')
-            critics[idx] = torch.load(arglist.old_model_name + f'grpo_c_{idx}.pt')
+            actors[idx] = torch.load(arglist.old_model_name + f'grpo_a_{idx}.pt', weights_only=False, map_location=arglist.device)
+            critics[idx] = torch.load(arglist.old_model_name + f'grpo_c_{idx}.pt', weights_only=False, map_location=arglist.device)
             optimizers_a[idx] = optim.Adam(actors[idx].parameters(), arglist.lr_a)
             optimizers_c[idx] = optim.Adam(critics[idx].parameters(), arglist.lr_c)
         print("Load GRPO Model......")
@@ -43,7 +43,7 @@ def get_eval_grpo_actor(env_agent, arglist):
     """
     actors = [None for _ in range(env_agent)]
     for idx in range(env_agent):
-        actors[idx] = torch.load(arglist.old_model_name + f'grpo_a_{idx}.pt')
+        actors[idx] = torch.load(arglist.old_model_name + f'grpo_a_{idx}.pt', weights_only=False, map_location=arglist.device)
     return actors
 
 

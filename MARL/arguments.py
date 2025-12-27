@@ -1,4 +1,5 @@
 import time
+import os
 import torch
 import argparse
 
@@ -24,7 +25,7 @@ def parse_args():
     parser.add_argument("--use_render", action='store_true', default=False,
                         help="by default, do not render-weight001-60% the env during training. If set, start render-weight001-60%. Note: something, the environment has internal render-weight001-60% process which is not controlled by this hyperparam.")
     parser.add_argument("--trace_dir", type=str, default="MADDPG3-1-radar")
-    parser.add_argument("--train", type=bool, default=True)  # True False
+    parser.add_argument("--train", type=bool, default=False)  # True False
     parser.add_argument("--restore", action="store_true", default=False)
     parser.add_argument("--save_dir", type=str, default="models/",
                         help="directory in which training state and model are loaded")

@@ -15,7 +15,7 @@ def get_eval_actor(env_agent, arglist):
     actors_cur = [None for _ in range(env_agent)]
 
     for idx in range(env_agent):
-        actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx))
+        actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx), weights_only=False, map_location=arglist.device)
     return actors_cur
 
 
@@ -24,7 +24,7 @@ def get_plane_actor(env_agent, arglist):
     actors_cur = [None for _ in range(env_agent)]
 
     for idx in range(env_agent):
-        actors_cur[idx] = torch.load(arglist.plane_model_name + 'a_c_{}.pt'.format(idx % 4))
+        actors_cur[idx] = torch.load(arglist.plane_model_name + 'a_c_{}.pt'.format(idx % 4), weights_only=False, map_location=arglist.device)
     return actors_cur
 
 
@@ -43,10 +43,10 @@ def get_trainers(env_agent, obs_shape_n, action_shape_n, arglist):
 
     if arglist.restore == True:  # restore the model
         for idx in range(env_agent):
-            actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx))
-            critics_cur[idx] = torch.load(arglist.old_model_name + 'c_c_{}.pt'.format(idx))
-            actors_tar[idx] = torch.load(arglist.old_model_name + 'a_t_{}.pt'.format(idx))
-            critics_tar[idx] = torch.load(arglist.old_model_name + 'c_t_{}.pt'.format(idx))
+            actors_cur[idx] = torch.load(arglist.old_model_name + 'a_c_{}.pt'.format(idx), weights_only=False, map_location=arglist.device)
+            critics_cur[idx] = torch.load(arglist.old_model_name + 'c_c_{}.pt'.format(idx), weights_only=False, map_location=arglist.device)
+            actors_tar[idx] = torch.load(arglist.old_model_name + 'a_t_{}.pt'.format(idx), weights_only=False, map_location=arglist.device)
+            critics_tar[idx] = torch.load(arglist.old_model_name + 'c_t_{}.pt'.format(idx), weights_only=False, map_location=arglist.device)
             optimizers_a[idx] = optim.Adam(actors_cur[idx].parameters(), arglist.lr_a)
             optimizers_c[idx] = optim.Adam(critics_cur[idx].parameters(), arglist.lr_c)
         print("Load Modeling......")
